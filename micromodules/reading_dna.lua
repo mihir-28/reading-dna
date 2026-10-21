@@ -7,7 +7,7 @@ local T = require("ffi/util").template
 local Kit = require("lib/bookshelf_module_kit")
 
 local MODULE_KEY = "reading_dna"
-local MODULE_VERSION = "0.2.3"
+local MODULE_VERSION = "0.3.0"
 local DEFAULT_WINDOW = 30
 local SESSION_GAP = 20 * 60
 local MIN_SESSION = 60
@@ -476,10 +476,230 @@ local function renderProfileHeader(snapshot, label, width, scale_pct, days)
     return group
 end
 
+local function getLayout(ctx)
+    local layout = ctx.config:get("layout", "field_notes")
+    if layout ~= "field_notes" and layout ~= "shelf_index" and layout ~= "fingerprint" then
+        return "field_notes"
+    end
+    return layout
+end
+
+local function addDivider(group, width)
+    local LineWidget = require("ui/widget/linewidget")
+    local Geom = require("ui/geometry")
+    group[#group + 1] = LineWidget:new{
+        background = Kit.COLOR_MUTED,
+        dimen = Geom:new{ w = math.max(1, width), h = 1 },
+    }
+end
+
+local function metricByKey(snapshot, key)
+    for _, metric in ipairs(snapshot.metrics) do
+        if metric.key == key then return metric end
+    end
+end
+
+local function renderLeadStat(value, label, width, scale_pct)
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = textWidget(value, width, scale_pct, "value")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
+    group[#group + 1] = textWidget(label, width, scale_pct, "muted")
+    return group
+end
+
+local function addTrend(group, snapshot, width, scale_pct, days)
+    if not snapshot.trend then return end
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local signed = function(value)
+        return value > 0 and ("+" .. value) or tostring(value)
+    end
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(10) }
+    group[#group + 1] = textWidget(
+        T(_("Vs prior %1d: %2 days · %3 min"), days,
+            signed(snapshot.trend.days), signed(snapshot.trend.minutes)),
+        width, scale_pct, "muted")
+end
+
+local function renderMetricGrid(group, metrics, width, scale_pct, show_scores)
+    local HorizontalGroup = require("ui/widget/horizontalgroup")
+    local HorizontalSpan = require("ui/widget/horizontalspan")
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local gap = Kit.sc(scale_pct)(18)
+    local col_width = math.max(1, math.floor((width - gap) / 2))
+    for index = 1, #metrics, 2 do
+        group[#group + 1] = HorizontalGroup:new{ align = "top",
+            renderMetric(metrics[index], col_width, scale_pct, show_scores),
+            HorizontalSpan:new{ width = gap },
+            metrics[index + 1]
+                and renderMetric(metrics[index + 1], col_width, scale_pct, show_scores)
+                or HorizontalSpan:new{ width = col_width },
+        }
+        if index + 1 < #metrics then
+            group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(16) }
+        end
+    end
+end
+
+local function renderFieldNotes(snapshot, label, width, scale_pct, days, show_scores)
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local HorizontalGroup = require("ui/widget/horizontalgroup")
+    local HorizontalSpan = require("ui/widget/horizontalspan")
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = renderProfileHeader(snapshot, label, width, scale_pct, days)
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) }
+    addDivider(group, width)
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
+
+    local observed = metricByKey(snapshot, "consistency")
+    local lead_gap = Kit.sc(scale_pct)(12)
+    local lead_width = math.max(1, math.floor((width - 2 * lead_gap) / 3))
+    group[#group + 1] = HorizontalGroup:new{ align = "top",
+        renderLeadStat(observed and observed.raw or "—", _("Active days"), lead_width, scale_pct),
+        HorizontalSpan:new{ width = lead_gap },
+        renderLeadStat(tostring(snapshot.book_count), _("Books"), lead_width, scale_pct),
+        HorizontalSpan:new{ width = lead_gap },
+        renderLeadStat(tostring(snapshot.total_minutes), _("Minutes read"), lead_width, scale_pct),
+    }
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(14) }
+    addDivider(group, width)
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(10) }
+    renderMetricGrid(group, snapshot.metrics, width, scale_pct, show_scores)
+    addTrend(group, snapshot, width, scale_pct, days)
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(10) }
+    group[#group + 1] = textWidget(
+        T(_("Statistics cover %1 of the selected %2 days · %3 author credits"),
+            observed and observed.raw or "—", days, snapshot.author_count),
+        width, scale_pct, "muted")
+    group[#group + 1] = textWidget(_("Finished books are not tracked reliably."), width, scale_pct, "muted")
+    return group
+end
+
+local function renderShelfIndex(snapshot, label, width, scale_pct, days, show_scores)
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = textWidget(_("KOReader · Reading record"), width, scale_pct, "label")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
+    group[#group + 1] = textWidget(label, width, scale_pct, "title")
+    group[#group + 1] = textWidget(
+        T(_("No. 01 · %1 active days in %2 selected"), snapshot.active_days, days),
+        width, scale_pct, "muted")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) }
+    addDivider(group, width)
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
+
+    local rows = {
+        { _("Data coverage"), metricByKey(snapshot, "consistency").raw },
+        { _("Books opened"), tostring(snapshot.book_count) },
+        { _("Reading time"), T(_("%1 minutes"), snapshot.total_minutes) },
+    }
+    for _, row in ipairs(rows) do
+        group[#group + 1] = textWidget(T(_("%1     %2"), row[1], row[2]), width, scale_pct, "normal")
+        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
+        addDivider(group, width)
+        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) }
+    end
+    group[#group + 1] = textWidget(_("MEASURE  ·  OBSERVED"), width, scale_pct, "label")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
+    for index, metric in ipairs(snapshot.metrics) do
+        group[#group + 1] = textWidget(
+            T(_("%1  ·  %2"), metric.label, metric.raw or metric.confidence_hint or _("Not available")),
+            width, scale_pct, "normal")
+        if show_scores and metric.score then
+            group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
+            group[#group + 1] = Kit.progressBar{
+                width = math.max(50, width), height = Kit.sc(scale_pct)(4), fraction = metric.score / 100,
+            }
+            group[#group + 1] = textWidget(T(_("Score %1 / 100"), metric.score), width, scale_pct, "muted")
+        end
+        if index < #snapshot.metrics then
+            group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(6) }
+            addDivider(group, width)
+            group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(6) }
+        end
+    end
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) }
+    group[#group + 1] = textWidget(
+        T(_("%1 author credits · Finished books not tracked reliably"), snapshot.author_count),
+        width, scale_pct, "muted")
+    addTrend(group, snapshot, width, scale_pct, days)
+    return group
+end
+
+local function renderBookSpines(book_count, width, scale_pct)
+    local Widget = require("ui/widget/widget")
+    local Geom = require("ui/geometry")
+    local height = Kit.sc(scale_pct)(62)
+    local spine_width = math.max(3, Kit.sc(scale_pct)(12))
+    local gap = math.max(2, Kit.sc(scale_pct)(5))
+    local count = math.min(book_count, 24, math.max(1, math.floor((width + gap) / (spine_width + gap))))
+    local total_width = count * (spine_width + gap) - gap
+    local WidgetClass = Widget:extend{}
+    function WidgetClass:getSize() return Geom:new{ w = total_width, h = height } end
+    function WidgetClass:paintTo(bb, x, y)
+        for i = 1, count do
+            local h = math.floor(height * (0.48 + ((i * 7) % 9) / 20))
+            local sx = x + (i - 1) * (spine_width + gap)
+            local sy = y + height - h
+            bb:paintRect(sx, sy, spine_width, h, Kit.COLOR_PRIMARY)
+            if spine_width > 2 and h > 3 then
+                local fill = i % 3 == 0 and Kit.COLOR_MUTED or Kit.CARD_BG
+                bb:paintRect(sx + 1, sy + 1, spine_width - 2, h - 2, fill)
+            end
+        end
+    end
+    return WidgetClass:new{}
+end
+
+local function renderFingerprint(snapshot, label, width, scale_pct, days, show_scores)
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local HorizontalGroup = require("ui/widget/horizontalgroup")
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = textWidget(_("Your reading fingerprint"), width, scale_pct, "label")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
+    group[#group + 1] = textWidget(label, width, scale_pct, "title")
+    group[#group + 1] = textWidget(
+        T(_("%1 reading days · %2 books · %3 days selected"), snapshot.active_days, snapshot.book_count, days),
+        width, scale_pct, "normal")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) }
+    group[#group + 1] = renderBookSpines(snapshot.book_count, width, scale_pct)
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
+    group[#group + 1] = textWidget(T(_("%1 minutes read · %2 author credits"), snapshot.total_minutes, snapshot.author_count),
+        width, scale_pct, "muted")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) }
+    addDivider(group, width)
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
+    for index, metric in ipairs(snapshot.metrics) do
+        local row = VerticalGroup:new{ align = "left" }
+        row[#row + 1] = textWidget(metric.label, width, scale_pct, "label")
+        row[#row + 1] = textWidget(metric.raw or metric.confidence_hint or _("Not available"), width, scale_pct, "value")
+        if show_scores and metric.score then
+            row[#row + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
+            row[#row + 1] = Kit.progressBar{
+                width = math.max(50, width), height = Kit.sc(scale_pct)(5), fraction = metric.score / 100,
+            }
+            row[#row + 1] = textWidget(T(_("Score %1"), metric.score), width, scale_pct, "muted")
+        end
+        group[#group + 1] = HorizontalGroup:new{ align = "top", row }
+        if index < #snapshot.metrics then group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) } end
+    end
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
+    group[#group + 1] = textWidget(
+        T(_("Statistics cover %1 days of %2 selected"),
+            metricByKey(snapshot, "consistency").raw, days), width, scale_pct, "muted")
+    addTrend(group, snapshot, width, scale_pct, days)
+    return group
+end
+
 local function render(ctx)
     local width, scale_pct = math.max(50, ctx.width or 200), ctx.scale or 100
     local days = getWindow(ctx)
     local show_scores = ctx.config:get("show_scores", true) ~= false
+    local layout = getLayout(ctx)
     _refresh = ctx.refresh
 
     if ctx.preview then
@@ -527,65 +747,30 @@ local function render(ctx)
     end
 
     local label = ctx.config:get("show_archetype", true) and snapshot.archetype or _("Profile")
+    local full = ctx.surface == "fullscreen"
+    if full then
+        if layout == "shelf_index" then
+            return renderShelfIndex(snapshot, label, width, scale_pct, days, show_scores)
+        elseif layout == "fingerprint" then
+            return renderFingerprint(snapshot, label, width, scale_pct, days, show_scores)
+        end
+        return renderFieldNotes(snapshot, label, width, scale_pct, days, show_scores)
+    end
     local group = require("ui/widget/verticalgroup"):new{ align = "left" }
     local VerticalSpan = require("ui/widget/verticalspan")
-    local header = renderProfileHeader(snapshot, label, width, scale_pct, days)
-    group[#group + 1] = header
+    group[#group + 1] = renderProfileHeader(snapshot, label, width, scale_pct, days)
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(16) }
-    local full = ctx.surface == "fullscreen"
-    local visible_metrics = snapshot.metrics
-    if not full then
-        visible_metrics = {}
-        for _, metric in ipairs(snapshot.metrics) do visible_metrics[#visible_metrics + 1] = metric end
-        table.sort(visible_metrics, function(a, b)
-            if a.score == nil then return false end
-            if b.score == nil then return true end
-            return a.score > b.score
-        end)
-    end
-    if full and width >= Kit.twoColMinWidth() * 1.45 then
-        local HorizontalGroup = require("ui/widget/horizontalgroup")
-        local HorizontalSpan = require("ui/widget/horizontalspan")
-        local gap = Kit.sc(scale_pct)(18)
-        local col_width = math.floor((width - gap) / 2)
-        for index = 1, #visible_metrics, 2 do
-            local row = HorizontalGroup:new{ align = "top",
-                renderMetric(visible_metrics[index], col_width, scale_pct, show_scores),
-                HorizontalSpan:new{ width = gap },
-                visible_metrics[index + 1]
-                    and renderMetric(visible_metrics[index + 1], col_width, scale_pct, show_scores)
-                    or HorizontalSpan:new{ width = col_width },
-            }
-            group[#group + 1] = row
-            if index + 1 < #visible_metrics then
-                group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(18) }
-            end
-        end
-    else
-        local count = full and #visible_metrics or math.min(2, #visible_metrics)
-        for i = 1, count do
-            local metric = visible_metrics[i]
-            if metric then group[#group + 1] = renderMetric(metric, width, scale_pct, show_scores) end
-            if i < count then group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) } end
-        end
-    end
-    if full then
-        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(18) }
-        if snapshot.trend then
-            local function signed(value)
-                return value > 0 and ("+" .. value) or tostring(value)
-            end
-            group[#group + 1] = textWidget(
-                T(_("Vs prior %1d: %2 days · %3 min"), days,
-                    signed(snapshot.trend.days), signed(snapshot.trend.minutes)),
-                width, scale_pct, "muted")
-        end
-        group[#group + 1] = textWidget(
-            T(_("%1 min · %2 credits"), snapshot.total_minutes, snapshot.author_count),
-            width, scale_pct, "muted")
-        group[#group + 1] = textWidget(
-            _("Finished books are not tracked reliably."),
-            width, scale_pct, "muted")
+    local visible_metrics = {}
+    for _, metric in ipairs(snapshot.metrics) do visible_metrics[#visible_metrics + 1] = metric end
+    table.sort(visible_metrics, function(a, b)
+        if a.score == nil then return false end
+        if b.score == nil then return true end
+        return a.score > b.score
+    end)
+    local count = math.min(2, #visible_metrics)
+    for i = 1, count do
+        group[#group + 1] = renderMetric(visible_metrics[i], width, scale_pct, show_scores)
+        if i < count then group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) } end
     end
     return group
 end
@@ -598,6 +783,7 @@ showSettings = function(ctx)
     local night_window = ctx.config:get("night_window", "21-04")
     local show_scores = ctx.config:get("show_scores", true) ~= false
     local show_archetype = ctx.config:get("show_archetype", true) ~= false
+    local current_layout = getLayout(ctx)
     local dialog
     local function updateSetting(name, value)
         return function()
@@ -626,6 +812,14 @@ showSettings = function(ctx)
             showSettings(ctx)
         end
     end
+    local function chooseLayout(layout)
+        return function()
+            UIManager:close(dialog)
+            ctx.config:set("layout", layout)
+            if ctx.menu and ctx.menu._reload then ctx.menu:_reload() end
+            showSettings(ctx)
+        end
+    end
     dialog = ButtonDialog:new{
         title = _("Reading DNA settings"),
         title_align = "center",
@@ -633,6 +827,10 @@ showSettings = function(ctx)
             { { text = (current == 30 and "✓ " or "  ") .. _("Last 30 days"), callback = chooseWindow(30) } },
             { { text = (current == 90 and "✓ " or "  ") .. _("Last 90 days"), callback = chooseWindow(90) } },
             { { text = (current == 365 and "✓ " or "  ") .. _("Last 365 days"), callback = chooseWindow(365) } },
+            { { text = _("Full-screen layout"), enabled = false } },
+            { { text = (current_layout == "field_notes" and "✓ " or "  ") .. _("Field Notes"), callback = chooseLayout("field_notes") } },
+            { { text = (current_layout == "shelf_index" and "✓ " or "  ") .. _("Shelf Index"), callback = chooseLayout("shelf_index") } },
+            { { text = (current_layout == "fingerprint" and "✓ " or "  ") .. _("Fingerprint"), callback = chooseLayout("fingerprint") } },
             { { text = _("Night hours"), enabled = false } },
             { { text = (night_window == "20-06" and "✓ " or "  ") .. "20:00–06:00", callback = chooseNight("20-06") } },
             { { text = (night_window == "21-04" and "✓ " or "  ") .. "21:00–04:00", callback = chooseNight("21-04") } },

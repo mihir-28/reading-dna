@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 — Selectable reading layouts
+
+- Add Field Notes, Shelf Index, and Fingerprint full-screen layouts, selected in module settings.
+- Keep analysis and compact Bookshelf cards shared across all layouts.
+- Add device-coverage context and visual reading-score summaries to full-screen views.
+
 ## 0.2.3 — SQLite fixture coverage
 
 - Add a real SQLite fixture for the statistics schema and module query shape.

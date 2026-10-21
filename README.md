@@ -2,7 +2,7 @@
 
 Offline reading profile for KOReader's Bookshelf micro-modules. It summarizes recent reading patterns as consistency, inferred session depth, book loyalty, exploration, night reading, and book switching.
 
-Current development version: `0.2.3`.
+Current development version: `0.3.0`.
 
 Reading DNA is a descriptive, playful summary, not a psychological assessment. Scores are hidden when evidence is too limited. Archetypes stay provisional until the selected window contains at least 14 active days and 5 hours of recorded reading.
 
@@ -33,11 +33,12 @@ After Kindle compatibility checks pass, tagged GitHub releases publish a ZIP con
 Long-press the card, then choose **Module settings**:
 
 - Analysis window: 30, 90, or 365 days.
+- Full-screen layout: Field Notes, Shelf Index, or Fingerprint.
 - Night interval: 20:00–06:00, 21:00–04:00, or 22:00–05:00, using device-local time.
 - Show or hide scores.
 - Show or hide archetype.
 
-Changing a setting clears the cached summary. Tap the card to recalculate.
+Changing the analysis window or night interval clears the cached summary; tap the card to recalculate. Layout changes apply to the next full-screen render without rerunning analysis.
 
 ## Metrics
 
@@ -48,7 +49,7 @@ Changing a setting clears the cached summary. Tap the card to recalculate.
 - **Night reading:** share of recorded reading seconds inside the selected night interval; requires at least 60 minutes.
 - **Book switching:** share of adjacent inferred sessions involving a different book; requires at least 4 sessions.
 
-The full-screen view compares active days and recorded minutes with the immediately preceding window of equal length. Trends appear only when both windows have at least 3 active days and 30 minutes recorded.
+The full-screen layouts share the same calculated metrics and cached snapshot. Field Notes emphasizes daily and reading totals, Shelf Index presents measurements as a ledger, and Fingerprint visualizes the book count and score bars. The full-screen view compares active days and recorded minutes with the immediately preceding window of equal length. Trends appear only when both windows have at least 3 active days and 30 minutes recorded.
 
 Overlapping event intervals are clipped to the earliest event, preventing duplicated reading time. Scores are simple descriptive scales, not validated measures. Archetype rules use thresholds: Deep Diver (depth and loyalty ≥65), Explorer (exploration ≥65), Marathoner (depth ≥60 and consistency ≥65), Night Owl (night reading ≥60), and Wanderer (switching ≥70). The evidence gate applies before assigning an archetype. Otherwise, the card shows Mixed Reader provisionally.
 
