@@ -18,7 +18,15 @@ jobs:
           python-version: "3.x"
       - name: Build install archive
         run: python scripts/package_release.py --output dist --tag "$GITHUB_REF_NAME"
+      - name: Prepare release notes from changelog
+        id: notes
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          python scripts/release_notes.py --version "$version" --output dist/release-notes.md
       - uses: softprops/action-gh-release@v2
         with:
+          name: Reading DNA ${{ steps.notes.outputs.version }}
+          body_path: dist/release-notes.md
           files: dist/reading-dna-*.zip
-          generate_release_notes: true
