@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2 — Layout setting isolation
+
+- Store visual choice under a Reading DNA-specific key, avoiding Bookshelf's reserved `layout` field.
+- Migrate existing layout choices and show a readable fallback if a renderer fails.
+- Clarify active days versus the history-span denominator.
+- Rebalance Fingerprint as a book-spine header with a compact two-column score grid.
+
 ## 0.3.1 — Automatic analysis refresh
 
 - Start analysis when the selected window or night interval changes.

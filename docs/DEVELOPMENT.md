@@ -4,7 +4,7 @@
 
 Target device runs KOReader `v2026.07.1` with Bookshelf installed. The installed contract describes a micro-module as a Lua file returning a spec table with a stable `key`, `title`, `summary`, and `render(ctx)`. The host sizes the card and provides `ctx.scale`, `ctx.surface`, and related context. User modules belong under `settings/bookshelf/micromodules/`; no registry edit is needed.
 
-The module uses Bookshelf's `lib/bookshelf_module_kit` for value cards, scaling, grayscale color roles, and `Kit.moduleStore("reading_dna")`. The three full-screen layouts are presentation functions in the same installable file; they share one snapshot and calculation path. Compact cards retain their existing renderer. Keeping one file preserves the direct-copy install step.
+The module uses Bookshelf's `lib/bookshelf_module_kit` for value cards, scaling, grayscale color roles, and `Kit.moduleStore("reading_dna")`. The three full-screen layouts are presentation functions in the same installable file; they share one snapshot and calculation path. Their preference uses the namespaced `reading_dna_layout` entry field; avoid Bookshelf's generic `layout` field. Compact cards retain their existing renderer. Keeping one file preserves the direct-copy install step.
 
 ## Data access
 

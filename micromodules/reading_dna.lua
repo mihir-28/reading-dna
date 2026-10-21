@@ -7,7 +7,7 @@ local T = require("ffi/util").template
 local Kit = require("lib/bookshelf_module_kit")
 
 local MODULE_KEY = "reading_dna"
-local MODULE_VERSION = "0.3.1"
+local MODULE_VERSION = "0.3.2"
 local DEFAULT_WINDOW = 30
 local SESSION_GAP = 20 * 60
 local MIN_SESSION = 60
@@ -362,6 +362,7 @@ local function calculateSingle(days, night_start, night_end, result)
         days = days,
         analyzed_at = result.now,
         active_days = active_days,
+        observed_days = observed_days,
         total_minutes = math.floor(total_seconds / 60),
         book_count = book_count,
         author_count = author_count,
@@ -506,12 +507,13 @@ local function renderProfileHeader(snapshot, label, width, scale_pct, days)
 end
 
 local function getLayout(ctx)
-    local layout = ctx.config:get("layout", "field_notes")
+    local layout = ctx.config:get("reading_dna_layout", "field_notes")
     if layout ~= "field_notes" and layout ~= "shelf_index" and layout ~= "fingerprint" then
         return "field_notes"
     end
     return layout
 end
+
 
 local function addDivider(group, width)
     local LineWidget = require("ui/widget/linewidget")
@@ -526,6 +528,13 @@ local function metricByKey(snapshot, key)
     for _, metric in ipairs(snapshot.metrics) do
         if metric.key == key then return metric end
     end
+end
+
+local function getObservedDays(snapshot)
+    if tonumber(snapshot.observed_days) then return tonumber(snapshot.observed_days) end
+    local consistency = metricByKey(snapshot, "consistency")
+    local stored = consistency and consistency.raw or ""
+    return tonumber(stored:match("/%s*(%d+)%s+days")) or snapshot.active_days
 end
 
 local function renderLeadStat(value, label, width, scale_pct)
@@ -582,11 +591,11 @@ local function renderFieldNotes(snapshot, label, width, scale_pct, days, show_sc
     addDivider(group, width)
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
 
-    local observed = metricByKey(snapshot, "consistency")
+    local observed_days = getObservedDays(snapshot)
     local lead_gap = Kit.sc(scale_pct)(12)
     local lead_width = math.max(1, math.floor((width - 2 * lead_gap) / 3))
     group[#group + 1] = HorizontalGroup:new{ align = "top",
-        renderLeadStat(observed and observed.raw or "—", _("Active days"), lead_width, scale_pct),
+        renderLeadStat(tostring(snapshot.active_days), _("Active days"), lead_width, scale_pct),
         HorizontalSpan:new{ width = lead_gap },
         renderLeadStat(tostring(snapshot.book_count), _("Books"), lead_width, scale_pct),
         HorizontalSpan:new{ width = lead_gap },
@@ -599,8 +608,8 @@ local function renderFieldNotes(snapshot, label, width, scale_pct, days, show_sc
     addTrend(group, snapshot, width, scale_pct, days)
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(10) }
     group[#group + 1] = textWidget(
-        T(_("Statistics cover %1 of the selected %2 days · %3 author credits"),
-            observed and observed.raw or "—", days, snapshot.author_count),
+        T(_("History span: %1 of %2 days · %3 author credits"),
+            observed_days, days, snapshot.author_count),
         width, scale_pct, "muted")
     group[#group + 1] = textWidget(_("Finished books are not tracked reliably."), width, scale_pct, "muted")
     return group
@@ -621,12 +630,13 @@ local function renderShelfIndex(snapshot, label, width, scale_pct, days, show_sc
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
 
     local rows = {
-        { _("Data coverage"), metricByKey(snapshot, "consistency").raw },
+        { _("Window"), T(_("Last %1 days"), days) },
+        { _("History span"), T(_("%1 of %2 days"), getObservedDays(snapshot), days) },
         { _("Books opened"), tostring(snapshot.book_count) },
         { _("Reading time"), T(_("%1 minutes"), snapshot.total_minutes) },
     }
     for _, row in ipairs(rows) do
-        group[#group + 1] = textWidget(T(_("%1     %2"), row[1], row[2]), width, scale_pct, "normal")
+        group[#group + 1] = textWidget(T(_("%1 · %2"), row[1], row[2]), width, scale_pct, "normal")
         group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
         addDivider(group, width)
         group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) }
@@ -686,13 +696,13 @@ end
 local function renderFingerprint(snapshot, label, width, scale_pct, days, show_scores)
     local VerticalGroup = require("ui/widget/verticalgroup")
     local VerticalSpan = require("ui/widget/verticalspan")
-    local HorizontalGroup = require("ui/widget/horizontalgroup")
     local group = VerticalGroup:new{ align = "left" }
     group[#group + 1] = textWidget(_("Your reading fingerprint"), width, scale_pct, "label")
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
     group[#group + 1] = textWidget(label, width, scale_pct, "title")
     group[#group + 1] = textWidget(
-        T(_("%1 reading days · %2 books · %3 days selected"), snapshot.active_days, snapshot.book_count, days),
+        T(_("%1 active · %2 books · stats %3 / %4 days"),
+            snapshot.active_days, snapshot.book_count, getObservedDays(snapshot), days),
         width, scale_pct, "normal")
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) }
     group[#group + 1] = renderBookSpines(snapshot.book_count, width, scale_pct)
@@ -702,27 +712,32 @@ local function renderFingerprint(snapshot, label, width, scale_pct, days, show_s
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) }
     addDivider(group, width)
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
-    for index, metric in ipairs(snapshot.metrics) do
-        local row = VerticalGroup:new{ align = "left" }
-        row[#row + 1] = textWidget(metric.label, width, scale_pct, "label")
-        row[#row + 1] = textWidget(metric.raw or metric.confidence_hint or _("Not available"), width, scale_pct, "value")
-        if show_scores and metric.score then
-            row[#row + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
-            row[#row + 1] = Kit.progressBar{
-                width = math.max(50, width), height = Kit.sc(scale_pct)(5), fraction = metric.score / 100,
-            }
-            row[#row + 1] = textWidget(T(_("Score %1"), metric.score), width, scale_pct, "muted")
-        end
-        group[#group + 1] = HorizontalGroup:new{ align = "top", row }
-        if index < #snapshot.metrics then group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) } end
-    end
+    renderMetricGrid(group, snapshot.metrics, width, scale_pct, show_scores)
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
     group[#group + 1] = textWidget(
-        T(_("Statistics cover %1 days of %2 selected"),
-            metricByKey(snapshot, "consistency").raw, days), width, scale_pct, "muted")
+        T(_("Coverage: %1 of %2 selected days"), getObservedDays(snapshot), days),
+        width, scale_pct, "muted")
     addTrend(group, snapshot, width, scale_pct, days)
     return group
 end
+
+local function renderFullScreenLayout(layout, snapshot, label, width, scale_pct, days, show_scores)
+    local renderers = {
+        field_notes = renderFieldNotes,
+        shelf_index = renderShelfIndex,
+        fingerprint = renderFingerprint,
+    }
+    local ok, widget = pcall(renderers[layout] or renderFieldNotes,
+        snapshot, label, width, scale_pct, days, show_scores)
+    if ok and widget then return widget end
+    require("logger").warn("[reading_dna] full-screen layout failed:", layout, widget)
+    return Kit.valueCard{
+        width = width, scale_pct = scale_pct,
+        heading = _("Reading DNA"), value = _("Layout unavailable"),
+        sub = _("Check the KOReader log or choose another layout."),
+    }
+end
+
 
 local function render(ctx)
     local width, scale_pct = math.max(50, ctx.width or 200), ctx.scale or 100
@@ -778,12 +793,7 @@ local function render(ctx)
     local label = ctx.config:get("show_archetype", true) and snapshot.archetype or _("Profile")
     local full = ctx.surface == "fullscreen"
     if full then
-        if layout == "shelf_index" then
-            return renderShelfIndex(snapshot, label, width, scale_pct, days, show_scores)
-        elseif layout == "fingerprint" then
-            return renderFingerprint(snapshot, label, width, scale_pct, days, show_scores)
-        end
-        return renderFieldNotes(snapshot, label, width, scale_pct, days, show_scores)
+        return renderFullScreenLayout(layout, snapshot, label, width, scale_pct, days, show_scores)
     end
     local group = require("ui/widget/verticalgroup"):new{ align = "left" }
     local VerticalSpan = require("ui/widget/verticalspan")
@@ -812,6 +822,15 @@ showSettings = function(ctx)
     local night_window = ctx.config:get("night_window", "21-04")
     local show_scores = ctx.config:get("show_scores", true) ~= false
     local show_archetype = ctx.config:get("show_archetype", true) ~= false
+    -- Older builds wrote their choice to Bookshelf's own `layout` entry field.
+    -- Move only our known values to a namespaced key, then release the host key.
+    local legacy_layout = ctx.config:get("layout")
+    if legacy_layout == "field_notes" or legacy_layout == "shelf_index" or legacy_layout == "fingerprint" then
+        if ctx.config:get("reading_dna_layout") == nil then
+            ctx.config:set("reading_dna_layout", legacy_layout)
+        end
+        ctx.config:delete("layout")
+    end
     local current_layout = getLayout(ctx)
     local dialog
     local function updateSetting(name, value)
@@ -843,7 +862,7 @@ showSettings = function(ctx)
     local function chooseLayout(layout)
         return function()
             UIManager:close(dialog)
-            ctx.config:set("layout", layout)
+            ctx.config:set("reading_dna_layout", layout)
             if ctx.menu and ctx.menu._reload then ctx.menu:_reload() end
             showSettings(ctx)
         end
