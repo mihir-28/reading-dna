@@ -33,7 +33,7 @@ The tap reads twice the selected period once. The calculation splits those rows 
 
 ## Regression tests
 
-Run `lua tests/test_reading_dna.lua` with Lua 5.1. Synthetic checks cover empty and short histories, interval overlaps, free-form author metadata, local calendar boundaries, and query/schema errors. The production module exposes these helpers only when the global `READING_DNA_TEST` flag is set by the test runner.
+Run `lua tests/test_reading_dna.lua` with Lua 5.1. Synthetic checks cover empty and short histories, interval overlaps, free-form author metadata, local calendar boundaries, async batch limits, and query/schema errors. `python -m unittest discover -s tests -p "test_*.py"` also exercises the statistics SELECT against a real SQLite fixture matching the inspected schema. The production module exposes Lua test helpers only when `READING_DNA_TEST` is set.
 
 Build a local install archive with `python scripts/package_release.py`. The script checks that the module version has a changelog entry and writes `dist/reading-dna-v<version>.zip`. Only tag a release after manual Kindle checks; the release workflow rejects a tag that differs from the module version.
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3 — SQLite fixture coverage
+
+- Add a real SQLite fixture for the statistics schema and module query shape.
+
 ## 0.2.2 — Compact analysis state
 
 - Shorten pending-analysis copy to fit Kindle cards.

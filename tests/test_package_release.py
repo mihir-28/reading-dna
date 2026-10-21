@@ -15,8 +15,8 @@ class ReleasePackageTests(unittest.TestCase):
                     set(bundle.namelist()),
                     {"reading_dna.lua", "README.md", "CHANGELOG.md", "LICENSE"},
                 )
-                self.assertIn(b"MODULE_VERSION = \"0.2.2\"", bundle.read("reading_dna.lua"))
-            self.assertEqual(archive.name, "reading-dna-v0.2.2.zip")
+                self.assertIn(b"MODULE_VERSION = \"0.2.3\"", bundle.read("reading_dna.lua"))
+            self.assertEqual(archive.name, "reading-dna-v0.2.3.zip")
 
 
 if __name__ == "__main__":
