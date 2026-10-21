@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 — Kindle UI polish
+
+- Shorten full-screen supporting text to reduce clipping on narrow screens.
+- Expose module version in the spec and establish per-update version tracking.
+
 ## 0.1.0 — Prototype
 
 - Add offline Reading DNA Bookshelf micro-module.

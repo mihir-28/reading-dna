@@ -7,6 +7,7 @@ local T = require("ffi/util").template
 local Kit = require("lib/bookshelf_module_kit")
 
 local MODULE_KEY = "reading_dna"
+local MODULE_VERSION = "0.1.1"
 local DEFAULT_WINDOW = 30
 local SESSION_GAP = 20 * 60
 local MIN_SESSION = 60
@@ -207,7 +208,7 @@ local function calculate(days, night_start, night_end)
             score = total_seconds > 0 and 100 * late_seconds / total_seconds or nil,
             sample = math.floor(total_seconds / 60), available = total_seconds >= 60 * 60,
             confidence_hint = _("Need 60 minutes recorded") },
-        { key = "switching", label = _("Book switching"), raw = T(_("%1 switches · %2 sessions"), switches, #sessions),
+        { key = "switching", label = _("Switches"), raw = T(_("%1 / %2 sessions"), switches, #sessions),
             score = #sessions > 1 and 100 * switches / (#sessions - 1) or nil,
             sample = #sessions, available = #sessions >= 4, confidence_hint = _("Need 4 valid sessions") },
     }
@@ -399,10 +400,10 @@ local function render(ctx)
     if full then
         group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(18) }
         group[#group + 1] = textWidget(
-            T(_("%1 min recorded · %2 author entries"), snapshot.total_minutes, snapshot.author_count),
+            T(_("%1 min · %2 authors"), snapshot.total_minutes, snapshot.author_count),
             width, scale_pct, "muted")
         group[#group + 1] = textWidget(
-            _("Completion is not measured; KOReader has no reliable finished-state data here."),
+            _("Finished books are not tracked reliably."),
             width, scale_pct, "muted")
     end
     return group
@@ -465,6 +466,7 @@ end
 
 return {
     key = MODULE_KEY,
+    version = MODULE_VERSION,
     title = _("Reading DNA"),
     summary = _("From KOReader reading statistics. Works offline."),
     keep_open = true,

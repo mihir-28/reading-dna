@@ -2,6 +2,8 @@
 
 Offline reading profile for KOReader's Bookshelf micro-modules. It summarizes recent reading patterns as consistency, inferred session depth, book loyalty, exploration, night reading, and book switching.
 
+Current development version: `0.1.1`.
+
 Reading DNA is a descriptive, playful summary, not a psychological assessment. Scores are hidden when evidence is too limited. Archetypes stay provisional until the selected window contains at least 14 active days and 5 hours of recorded reading.
 
 ## Requirements
