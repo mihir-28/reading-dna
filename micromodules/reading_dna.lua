@@ -7,7 +7,7 @@ local T = require("ffi/util").template
 local Kit = require("lib/bookshelf_module_kit")
 
 local MODULE_KEY = "reading_dna"
-local MODULE_VERSION = "0.2.1"
+local MODULE_VERSION = "0.2.2"
 local DEFAULT_WINDOW = 30
 local SESSION_GAP = 20 * 60
 local MIN_SESSION = 60
@@ -514,7 +514,7 @@ local function render(ctx)
         return Kit.valueCard{
             width = width, scale_pct = scale_pct,
             heading = _("Reading DNA"), value = _("Analyzing…"),
-            sub = _("Reading statistics in small batches"),
+            sub = _("Reading stats…"),
         }
     end
     if snapshot.empty then

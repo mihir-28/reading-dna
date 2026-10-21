@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 — Compact analysis state
+
+- Shorten pending-analysis copy to fit Kindle cards.
+
 ## 0.2.1 — Release packaging
 
 - Add reproducible install ZIP packaging and tagged GitHub release workflow.
