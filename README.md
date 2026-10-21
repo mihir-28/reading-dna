@@ -2,7 +2,7 @@
 
 Offline reading profile for KOReader's Bookshelf micro-modules. It summarizes reading regularity, inferred session length, focused days, reading breadth, night-time share, book changes, streaks, and weekend reading.
 
-Current development version: `0.4.0`.
+Current development version: `0.4.2`.
 
 Reading DNA is a descriptive reading summary, not a psychological assessment. Measures stay in their original units; small samples are marked provisional. Reader-pattern traits need at least 14 active days and 5 hours of recorded reading overall.
 
@@ -33,11 +33,10 @@ After Kindle compatibility checks pass, tagged GitHub releases publish a ZIP con
 Long-press the card, then choose **Module settings**:
 
 - Analysis window: 30, 90, or 365 days.
-- Full-screen layout: Field Notes, Shelf Index, or Fingerprint.
 - Night interval: 20:00–06:00, 21:00–04:00, or 22:00–05:00, using device-local time.
 - Show or hide reader-pattern traits.
 
-Changing the analysis window or night interval starts analysis automatically. Layout and trait-display choices apply without rerunning analysis. Tap the card any time to refresh statistics.
+Changing the analysis window or night interval starts analysis automatically. Trait-display choice applies without rerunning analysis. Tap the card any time to refresh statistics.
 
 ## Metrics
 
@@ -50,9 +49,9 @@ Changing the analysis window or night interval starts analysis automatically. La
 - **Longest reading streak:** longest run of consecutive local calendar days with reading events.
 - **Weekend reading:** share of recorded time on Saturday and Sunday, plus number of weekend days with reading.
 
-No 0–100 scores are shown: those earlier scales mixed unlike quantities and implied a quality ranking. Measures with small samples remain visible with a provisional note. The overall profile requires at least 14 active days and 5 hours recorded. Qualified pattern traits appear together rather than competing for one archetype. Traits include Steady Reader (at least 35% of recorded-history days), Long-session Reader (30-minute median across at least 3 sessions), Short-session Reader (15-minute median or less across at least 5 sessions), Focused Reader (at least 60% focused days), Wide-ranging Reader (8 or more distinct books), Night Reader (at least 40% in selected night hours and 3 hours recorded), Book-switching Reader (at least 40% of transitions across 4 sessions), Streak Builder (5 consecutive reading days), and Weekend Reader (at least 50% of reading time on weekends, across 4 or more weekend reading days). These are descriptive labels, not goals or judgments.
+No 0–100 scores are shown: those earlier scales mixed unlike quantities and implied a quality ranking. Measures with small samples remain visible with a provisional note. The overall profile requires at least 14 active days and 5 hours recorded. Qualified pattern traits appear together rather than competing for one archetype: Steady (35%+ of history days), Long-session (30-minute median across 3+ sessions), Short-session (15-minute median or less across 5+ sessions), Focused (60%+ focused days), Explorer (8+ books), Night Owl (40%+ within selected night hours and 3+ hours recorded), Book Hopper (40%+ changed transitions across 4+ sessions), Streak Builder (5 consecutive reading days), and Weekend Regular (50%+ of reading time on weekends, across 4+ weekend reading days). These are descriptive labels, not goals or judgments.
 
-The full-screen layouts share the same calculated metrics and cached snapshot. Field Notes emphasizes profile context, Shelf Index presents measurements as a ledger, and Fingerprint shows them as evidence cards. Where both equal-length windows have at least 3 active days and 30 minutes recorded, the view compares active days and minutes with the immediately preceding window.
+The full-screen Fingerprint view uses a varied-height book shelf and eight compact evidence cards. Values stay in their original units; definitions appear beneath them. Where both equal-length windows have at least 3 active days and 30 minutes recorded, the view compares active days and minutes with the immediately preceding window.
 
 Overlapping event intervals are clipped to the earliest event, preventing duplicated reading time. “History days” are a calendar span inferred from the earliest event, not a completeness guarantee. Session and book counts depend on KOReader's event data and metadata quality.
 

@@ -7,8 +7,8 @@ local T = require("ffi/util").template
 local Kit = require("lib/bookshelf_module_kit")
 
 local MODULE_KEY = "reading_dna"
-local MODULE_VERSION = "0.4.0"
-local PROFILE_SCHEMA_VERSION = "0.4"
+local MODULE_VERSION = "0.4.2"
+local PROFILE_SCHEMA_VERSION = "0.6"
 local DEFAULT_WINDOW = 30
 local SESSION_GAP = 20 * 60
 local MIN_SESSION = 60
@@ -360,38 +360,40 @@ local function calculateSingle(days, night_start, night_end, result)
     local night_window = T(_("%1:00–%2:00"), string.format("%02d", night_start), string.format("%02d", night_end))
     local metrics = {
         { key = "consistency", label = _("Reading regularity"),
-            raw = T(_("%1 of %2 history days · %3%"), active_days, observed_days, regularity_pct),
-            detail = _("History span starts at first recorded event; gaps count as non-reading days."),
+            raw = T(_("%1/%2 days · %3%"), active_days, observed_days, regularity_pct),
+            detail = _("Of recorded-history days; gaps count as non-reading."),
             sample = observed_days, available = active_days >= 3 and total_seconds >= 30 * 60,
             confidence_hint = active_days < 3 and _("Need 3 active days") or _("Need 30 minutes recorded") },
         { key = "depth", label = _("Session length"),
             raw = median_session and T(_("%1 min median"), math.floor(median_session / 60 + 0.5)) or _("Not enough sessions"),
-            detail = T(_("%1 valid sessions · split after 20 min idle"), #sessions),
+            detail = T(_("%1 sessions · split at 20 min idle"), #sessions),
             sample = #sessions, available = #sessions >= 3, confidence_hint = _("Need 3 valid sessions") },
         { key = "loyalty", label = _("Focused days"),
-            raw = T(_("%1 of %2 reading days · %3%"), focused_days, active_days, focus_pct),
-            detail = _("One book held at least 60% of that day’s recorded time."), sample = active_days,
+            raw = T(_("%1/%2 days · %3%"), focused_days, active_days, focus_pct),
+            detail = _("One book held 60%+ of daily reading."), sample = active_days,
             available = active_days >= 5, confidence_hint = _("Need 5 reading days") },
         { key = "exploration", label = _("Reading breadth"),
-            raw = T(_("%1 titles · %2 author metadata entries"), book_count, author_count),
-            detail = _("Author entries are distinct stored metadata strings, not verified people."),
+            raw = T(_("%1 books · %2 authors"), book_count, author_count),
+            detail = _("Distinct stored author entries; metadata may vary."),
             sample = book_count, available = book_count >= 3, confidence_hint = _("Need 3 titles") },
         { key = "night", label = _("Night-time share"),
-            raw = T(_("%1% of reading time · %2"), night_pct, night_window),
-            detail = _("Share inside selected device-local hours; not a quality score."),
+            raw = T(_("%1% · %2"), night_pct, night_window),
+            detail = _("Reading within selected local night hours."),
             sample = math.floor(total_seconds / 60), available = total_seconds >= 60 * 60,
             confidence_hint = _("Need 60 minutes recorded") },
         { key = "switching", label = _("Book changes"),
-            raw = switch_raw,
-            detail = _("Different books across adjacent valid sessions."), sample = #sessions,
+            raw = switch_denominator > 0
+                and T(_("%1/%2 changes · %3%"), switches, switch_denominator, switch_pct)
+                or switch_raw,
+            detail = _("Different books across adjacent sessions."), sample = #sessions,
             available = #sessions >= 4, confidence_hint = _("Need 4 valid sessions") },
         { key = "streak", label = _("Longest reading streak"),
-            raw = T(_("%1 consecutive days"), longest_streak),
-            detail = _("Consecutive local calendar days with recorded reading."), sample = active_days,
+            raw = T(_("%1-day streak"), longest_streak),
+            detail = _("Consecutive local reading days."), sample = active_days,
             available = active_days >= 3, confidence_hint = _("Need 3 reading days") },
         { key = "weekend", label = _("Weekend reading"),
-            raw = T(_("%1% of time · %2 weekend days"), weekend_pct, weekend_active_days),
-            detail = _("Share of recorded time on Saturday and Sunday, using device-local dates."),
+            raw = T(_("%1% · %2 weekend days"), weekend_pct, weekend_active_days),
+            detail = _("Share of time read on local Saturdays/Sundays."),
             sample = weekend_active_days, available = weekend_active_days >= 4,
             confidence_hint = _("Need 4 weekend reading days") },
     }
@@ -402,18 +404,18 @@ local function calculateSingle(days, night_start, night_end, result)
         archetypes[#archetypes + 1] = name
     end
     if evidence then
-        if regularity_pct >= 35 then addArchetype(_("Steady Reader")) end
+        if regularity_pct >= 35 then addArchetype(_("Steady")) end
         if median_session and median_session >= 30 * 60 and #sessions >= 3 then
-            addArchetype(_("Long-session Reader"))
+            addArchetype(_("Long-session"))
         elseif median_session and median_session <= 15 * 60 and #sessions >= 5 then
-            addArchetype(_("Short-session Reader"))
+            addArchetype(_("Short-session"))
         end
-        if active_days >= 5 and focus_pct >= 60 then addArchetype(_("Focused Reader")) end
-        if book_count >= 8 then addArchetype(_("Wide-ranging Reader")) end
-        if total_seconds >= 3 * 60 * 60 and night_pct >= 40 then addArchetype(_("Night Reader")) end
-        if #sessions >= 4 and switch_pct >= 40 then addArchetype(_("Book-switching Reader")) end
+        if active_days >= 5 and focus_pct >= 60 then addArchetype(_("Focused")) end
+        if book_count >= 8 then addArchetype(_("Explorer")) end
+        if total_seconds >= 3 * 60 * 60 and night_pct >= 40 then addArchetype(_("Night Owl")) end
+        if #sessions >= 4 and switch_pct >= 40 then addArchetype(_("Book Hopper")) end
         if longest_streak >= 5 then addArchetype(_("Streak Builder")) end
-        if weekend_active_days >= 4 and weekend_pct >= 50 then addArchetype(_("Weekend Reader")) end
+        if weekend_active_days >= 4 and weekend_pct >= 50 then addArchetype(_("Weekend Regular")) end
     end
     if #archetypes == 0 then archetypes[1] = evidence and _("Mixed Reader") or _("Building a pattern") end
 
@@ -569,15 +571,6 @@ local function renderProfileHeader(snapshot, label, width, scale_pct, days)
         width, scale_pct, "muted")
     return group
 end
-
-local function getLayout(ctx)
-    local layout = ctx.config:get("reading_dna_layout", "field_notes")
-    if layout ~= "field_notes" and layout ~= "shelf_index" and layout ~= "fingerprint" then
-        return "field_notes"
-    end
-    return layout
-end
-
 
 local function addDivider(group, width)
     local LineWidget = require("ui/widget/linewidget")
@@ -933,8 +926,12 @@ local function renderFingerprint(snapshot, label, width, scale_pct, days, show_t
     }
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(4) }
     group[#group + 1] = textWidget(label, width, scale_pct, "display")
-    local trait_summary = show_traits and getTraitSummary(snapshot) or nil
-    if trait_summary then group[#group + 1] = textWidget(trait_summary, width, scale_pct, "muted") end
+    if show_traits then
+        group[#group + 1] = Kit.fitText{
+            text = getTraitSummary(snapshot), width = width, scale_pct = scale_pct,
+            size = 13, fgcolor = Kit.COLOR_MUTED, max_h = Kit.sc(scale_pct)(42),
+        }
+    end
     group[#group + 1] = textWidget(
         T(_("%1 reading days · history %2"), snapshot.active_days, getCoverageText(snapshot)),
         width, scale_pct, "normal")
@@ -979,20 +976,14 @@ local function renderFingerprint(snapshot, label, width, scale_pct, days, show_t
     return group
 end
 
-local function renderFullScreenLayout(layout, snapshot, label, width, scale_pct, days, show_traits)
-    local renderers = {
-        field_notes = renderFieldNotes,
-        shelf_index = renderShelfIndex,
-        fingerprint = renderFingerprint,
-    }
-    local ok, widget = pcall(renderers[layout] or renderFieldNotes,
-        snapshot, label, width, scale_pct, days, show_traits)
+local function renderFullScreenLayout(snapshot, label, width, scale_pct, days, show_traits)
+    local ok, widget = pcall(renderFingerprint, snapshot, label, width, scale_pct, days, show_traits)
     if ok and widget then return widget end
-    require("logger").warn("[reading_dna] full-screen layout failed:", layout, widget)
+    require("logger").warn("[reading_dna] fingerprint layout failed:", widget)
     return Kit.valueCard{
         width = width, scale_pct = scale_pct,
         heading = _("Reading DNA"), value = _("Layout unavailable"),
-        sub = _("Check the KOReader log or choose another layout."),
+        sub = _("Check the KOReader log."),
     }
 end
 
@@ -1001,7 +992,6 @@ local function render(ctx)
     local width, scale_pct = math.max(50, ctx.width or 200), ctx.scale or 100
     local days = getWindow(ctx)
     local show_traits = ctx.config:get("show_archetype", true) ~= false
-    local layout = getLayout(ctx)
     _refresh = ctx.refresh
 
     if ctx.preview then
@@ -1051,7 +1041,7 @@ local function render(ctx)
     local label = _("Reading profile")
     local full = ctx.surface == "fullscreen"
     if full then
-        return renderFullScreenLayout(layout, snapshot, label, width, scale_pct, days, show_traits)
+        return renderFullScreenLayout(snapshot, label, width, scale_pct, days, show_traits)
     end
     local group = require("ui/widget/verticalgroup"):new{ align = "left" }
     local VerticalSpan = require("ui/widget/verticalspan")
@@ -1093,7 +1083,6 @@ showSettings = function(ctx)
         end
         ctx.config:delete("layout")
     end
-    local current_layout = getLayout(ctx)
     local dialog
     local function updateSetting(name, value)
         return function()
@@ -1121,14 +1110,6 @@ showSettings = function(ctx)
             showSettings(ctx)
         end
     end
-    local function chooseLayout(layout)
-        return function()
-            UIManager:close(dialog)
-            ctx.config:set("reading_dna_layout", layout)
-            if ctx.menu and ctx.menu._reload then ctx.menu:_reload() end
-            showSettings(ctx)
-        end
-    end
     dialog = ButtonDialog:new{
         title = _("Reading DNA settings"),
         title_align = "center",
@@ -1136,10 +1117,6 @@ showSettings = function(ctx)
             { { text = (current == 30 and "✓ " or "  ") .. _("Last 30 days"), callback = chooseWindow(30) } },
             { { text = (current == 90 and "✓ " or "  ") .. _("Last 90 days"), callback = chooseWindow(90) } },
             { { text = (current == 365 and "✓ " or "  ") .. _("Last 365 days"), callback = chooseWindow(365) } },
-            { { text = _("Full-screen layout"), enabled = false } },
-            { { text = (current_layout == "field_notes" and "✓ " or "  ") .. _("Field Notes"), callback = chooseLayout("field_notes") } },
-            { { text = (current_layout == "shelf_index" and "✓ " or "  ") .. _("Shelf Index"), callback = chooseLayout("shelf_index") } },
-            { { text = (current_layout == "fingerprint" and "✓ " or "  ") .. _("Fingerprint"), callback = chooseLayout("fingerprint") } },
             { { text = _("Night hours"), enabled = false } },
             { { text = (night_window == "20-06" and "✓ " or "  ") .. "20:00–06:00", callback = chooseNight("20-06") } },
             { { text = (night_window == "21-04" and "✓ " or "  ") .. "21:00–04:00", callback = chooseNight("21-04") } },

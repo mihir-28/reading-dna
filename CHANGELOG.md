@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.2 — Shorter trait names
+
+- Rename reader traits to concise labels without repeated “Reader” wording.
+- Refresh cached trait labels after schema change.
+
+## 0.4.1 — Fingerprint-only layout
+
+- Keep Fingerprint as the sole full-screen layout; shorten measure text to prevent clipping.
+- Refresh cached metric text after schema change.
+
 ## 0.4.0 — Evidence-based reading profiles
 
 - Remove arbitrary 0–100 scores; show observed values, definitions, and sample thresholds.
