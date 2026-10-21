@@ -1,0 +1,8 @@
+# Local development files
+references/
+development-plan.docx
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+FileManager_*.png
