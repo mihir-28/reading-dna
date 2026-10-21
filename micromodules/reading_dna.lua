@@ -361,6 +361,9 @@ local function calculateSingle(days, night_start, night_end, result)
         empty = false,
         days = days,
         analyzed_at = result.now,
+        coverage_start = result.first_event
+            and math.max(result.first_event, result.window_start or result.first_event)
+            or result.window_start,
         active_days = active_days,
         observed_days = observed_days,
         total_minutes = math.floor(total_seconds / 60),
@@ -453,8 +456,10 @@ end
 
 local function textWidget(text, width, scale_pct, role)
     local TextWidget = require("lib/bookshelf_colour_text")
-    local opts = (role == "title" or role == "value") and { bold = true } or nil
-    local size = role == "title" and 24 or (role == "value" and 17 or 13)
+    local opts = (role == "title" or role == "display" or role == "value"
+        or role == "metric_value" or role == "lead") and { bold = true } or nil
+    local size = role == "display" and 42 or (role == "lead" and 38
+        or (role == "metric_value" and 21 or (role == "title" and 24 or (role == "value" and 17 or 13))))
     local face, bold = Kit.face(size, scale_pct, opts)
     return TextWidget:new{
         text = text,
@@ -537,14 +542,115 @@ local function getObservedDays(snapshot)
     return tonumber(stored:match("/%s*(%d+)%s+days")) or snapshot.active_days
 end
 
+local function getCoverageText(snapshot)
+    if snapshot.coverage_start then
+        return T(_("%1 days · %2—%3"), getObservedDays(snapshot),
+            os.date("%b %d", snapshot.coverage_start), os.date("%b %d, %Y", snapshot.analyzed_at))
+    end
+    return T(_("%1 observed days"), getObservedDays(snapshot))
+end
+
 local function renderLeadStat(value, label, width, scale_pct)
     local VerticalGroup = require("ui/widget/verticalgroup")
     local VerticalSpan = require("ui/widget/verticalspan")
     local group = VerticalGroup:new{ align = "left" }
-    group[#group + 1] = textWidget(value, width, scale_pct, "value")
+    group[#group + 1] = textWidget(value, width, scale_pct, "lead")
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
     group[#group + 1] = textWidget(label, width, scale_pct, "muted")
     return group
+end
+
+local function renderReadingNote(metric, label, note, width, scale_pct, value_override)
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = textWidget(label, width, scale_pct, "label")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(2) }
+    group[#group + 1] = textWidget(value_override or (metric and metric.raw or _("No reading data")), width, scale_pct, "metric_value")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(2) }
+    group[#group + 1] = textWidget(note, width, scale_pct, "muted")
+    return group
+end
+
+local function frameWidget(child, scale_pct, target_width)
+    local Widget = require("ui/widget/widget")
+    local Geom = require("ui/geometry")
+    local pad, stroke = Kit.sc(scale_pct)(6), math.max(1, Kit.sc(scale_pct)(1))
+    local child_size = child:getSize()
+    local width, height = math.max(child_size.w + pad * 2, target_width or 0), child_size.h + pad * 2
+    local FrameWidget = Widget:extend{}
+    function FrameWidget:getSize() return Geom:new{ w = width, h = height } end
+    function FrameWidget:paintTo(bb, x, y)
+        bb:paintRect(x, y, width, stroke, Kit.COLOR_MUTED)
+        bb:paintRect(x, y + height - stroke, width, stroke, Kit.COLOR_MUTED)
+        bb:paintRect(x, y, stroke, height, Kit.COLOR_MUTED)
+        bb:paintRect(x + width - stroke, y, stroke, height, Kit.COLOR_MUTED)
+        child:paintTo(bb, x + pad, y + pad)
+    end
+    return FrameWidget:new{}
+end
+
+local function renderScoreDots(score, width, scale_pct)
+    local Widget = require("ui/widget/widget")
+    local Geom = require("ui/geometry")
+    local sc = Kit.sc(scale_pct)
+    local count, gap, height = 10, sc(3), sc(7)
+    local dot_width = math.max(2, math.floor((width - gap * (count - 1)) / count))
+    local total_width = count * dot_width + (count - 1) * gap
+    local filled = score and math.floor(score / 10 + 0.5) or 0
+    local DotWidget = Widget:extend{}
+    function DotWidget:getSize() return Geom:new{ w = total_width, h = height } end
+    function DotWidget:paintTo(bb, x, y)
+        for i = 1, count do
+            local dx = x + (i - 1) * (dot_width + gap)
+            if i <= filled then
+                bb:paintRect(dx, y, dot_width, height, Kit.COLOR_PRIMARY)
+            else
+                bb:paintRect(dx, y, dot_width, 1, Kit.COLOR_MUTED)
+                bb:paintRect(dx, y + height - 1, dot_width, 1, Kit.COLOR_MUTED)
+                bb:paintRect(dx, y, 1, height, Kit.COLOR_MUTED)
+                bb:paintRect(dx + dot_width - 1, y, 1, height, Kit.COLOR_MUTED)
+                if dot_width > 2 and height > 2 then
+                    bb:paintRect(dx + 1, y + 1, dot_width - 2, height - 2, Kit.CARD_BG)
+                end
+            end
+        end
+    end
+    return DotWidget:new{}
+end
+
+local function renderScoreTile(metric, title, note, width, scale_pct)
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local content = VerticalGroup:new{ align = "left" }
+    content[#content + 1] = textWidget(title or metric.label, width, scale_pct, "label")
+    content[#content + 1] = textWidget(metric.raw or _("No reading data"), width, scale_pct, "metric_value")
+    content[#content + 1] = textWidget(note or "", width, scale_pct, "muted")
+    content[#content + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
+    content[#content + 1] = renderScoreDots(metric.score, width, scale_pct)
+    content[#content + 1] = textWidget(metric.score and T(_("Score %1"), metric.score) or _("Score unavailable"),
+        width, scale_pct, "muted")
+    return frameWidget(content, scale_pct, width + Kit.sc(scale_pct)(12))
+end
+
+local function renderBarcode(width, scale_pct)
+    local Widget = require("ui/widget/widget")
+    local Geom = require("ui/geometry")
+    local height = Kit.sc(scale_pct)(28)
+    local pattern = { 2, 1, 3, 1, 1, 2, 1, 3, 2, 1, 1, 2, 3, 1, 2, 1, 3, 1, 1, 2, 2, 1 }
+    local modules = 0
+    for i = 1, #pattern do modules = modules + pattern[i] end
+    local unit = math.max(1, math.floor(width / modules))
+    local BarcodeWidget = Widget:extend{}
+    function BarcodeWidget:getSize() return Geom:new{ w = unit * modules, h = height } end
+    function BarcodeWidget:paintTo(bb, x, y)
+        local offset = 0
+        for i = 1, #pattern do
+            if i % 2 == 1 then bb:paintRect(x + offset, y, pattern[i] * unit, height, Kit.COLOR_PRIMARY) end
+            offset = offset + pattern[i] * unit
+        end
+    end
+    return BarcodeWidget:new{}
 end
 
 local function addTrend(group, snapshot, width, scale_pct, days)
@@ -586,12 +692,31 @@ local function renderFieldNotes(snapshot, label, width, scale_pct, days, show_sc
     local HorizontalGroup = require("ui/widget/horizontalgroup")
     local HorizontalSpan = require("ui/widget/horizontalspan")
     local group = VerticalGroup:new{ align = "left" }
-    group[#group + 1] = renderProfileHeader(snapshot, label, width, scale_pct, days)
-    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) }
+    local observed_days = getObservedDays(snapshot)
+    local descriptions = {
+        Explorer = _("You explore books and authors across reading sessions."),
+        ["Deep Diver"] = _("Longer sessions and focused days shape your reading."),
+        Marathoner = _("Steady reading days and longer sessions shape your profile."),
+        ["Night Owl"] = _("A notable share of your reading happens at night."),
+        Wanderer = _("You switch between books across reading sessions."),
+        ["Mixed Reader"] = _("A descriptive sketch of your recent reading habits."),
+    }
+    local masthead = HorizontalGroup:new{ align = "center",
+        textWidget(T(_("READING DNA  /  %1"), os.date("%Y", snapshot.analyzed_at)), width * 0.78, scale_pct, "label"),
+        frameWidget(textWidget("R", Kit.sc(scale_pct)(32), scale_pct, "title"), scale_pct),
+    }
+    group[#group + 1] = masthead
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
+    group[#group + 1] = textWidget(label, width, scale_pct, "display")
+    group[#group + 1] = textWidget(
+        descriptions[label] or descriptions["Mixed Reader"], width, scale_pct, "muted")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(10) }
+    group[#group + 1] = textWidget(T(_("Selected window: %1 days"), days), width, scale_pct, "label")
+    group[#group + 1] = textWidget(T(_("Statistics available: %1"), getCoverageText(snapshot)),
+        width, scale_pct, "normal")
     addDivider(group, width)
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
 
-    local observed_days = getObservedDays(snapshot)
     local lead_gap = Kit.sc(scale_pct)(12)
     local lead_width = math.max(1, math.floor((width - 2 * lead_gap) / 3))
     group[#group + 1] = HorizontalGroup:new{ align = "top",
@@ -603,92 +728,153 @@ local function renderFieldNotes(snapshot, label, width, scale_pct, days, show_sc
     }
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(14) }
     addDivider(group, width)
-    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(10) }
-    renderMetricGrid(group, snapshot.metrics, width, scale_pct, show_scores)
-    addTrend(group, snapshot, width, scale_pct, days)
-    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(10) }
-    group[#group + 1] = textWidget(
-        T(_("History span: %1 of %2 days · %3 author credits"),
-            observed_days, days, snapshot.author_count),
-        width, scale_pct, "muted")
-    group[#group + 1] = textWidget(_("Finished books are not tracked reliably."), width, scale_pct, "muted")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
+    group[#group + 1] = textWidget(_("READING PATTERNS"), width, scale_pct, "label")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(6) }
+    local note_gap = Kit.sc(scale_pct)(18)
+    local note_width = math.max(1, math.floor((width - note_gap) / 2))
+    local depth = metricByKey(snapshot, "depth")
+    local loyalty = metricByKey(snapshot, "loyalty")
+    local night = metricByKey(snapshot, "night")
+    local switching = metricByKey(snapshot, "switching")
+    local notes = {
+        { depth, _("Session depth"), depth and T(_("median · %1 sessions"), depth.sample) or _("median session") },
+        { loyalty, _("Focused days"), _("one book held most reading time") },
+        { { raw = tostring(snapshot.author_count) }, _("Author credits"), _("distinct author entries") },
+        { night, _("Night reading"), _("of recorded time") },
+        { switching, _("Book changes"), _("between sessions") },
+    }
+    for index = 1, #notes, 2 do
+        local left, right = notes[index], notes[index + 1]
+        group[#group + 1] = HorizontalGroup:new{ align = "top",
+            renderReadingNote(left[1], left[2], left[3], note_width, scale_pct, left[4]),
+            HorizontalSpan:new{ width = note_gap },
+            right and renderReadingNote(right[1], right[2], right[3], note_width, scale_pct, right[4])
+                or HorizontalSpan:new{ width = note_width },
+        }
+        if index + 1 < #notes then group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) } end
+    end
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
+    local coverage_note = VerticalGroup:new{ align = "left",
+        textWidget(
+        T(_("Coverage note. Statistics are available for %1 of the selected %2 days."), observed_days, days),
+        width - Kit.sc(scale_pct)(12), scale_pct, "muted"),
+        textWidget(_("Finished books are not tracked reliably."), width - Kit.sc(scale_pct)(12), scale_pct, "muted"),
+    }
+    group[#group + 1] = frameWidget(coverage_note, scale_pct, width)
     return group
 end
 
 local function renderShelfIndex(snapshot, label, width, scale_pct, days, show_scores)
     local VerticalGroup = require("ui/widget/verticalgroup")
     local VerticalSpan = require("ui/widget/verticalspan")
+    local HorizontalGroup = require("ui/widget/horizontalgroup")
+    local HorizontalSpan = require("ui/widget/horizontalspan")
     local group = VerticalGroup:new{ align = "left" }
-    group[#group + 1] = textWidget(_("KOReader · Reading record"), width, scale_pct, "label")
-    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
-    group[#group + 1] = textWidget(label, width, scale_pct, "title")
-    group[#group + 1] = textWidget(
-        T(_("No. 01 · %1 active days in %2 selected"), snapshot.active_days, days),
-        width, scale_pct, "muted")
-    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) }
+    local header_gap = Kit.sc(scale_pct)(12)
+    group[#group + 1] = HorizontalGroup:new{ align = "top",
+        textWidget(_("KOREADER  /  READING RECORD"), width - header_gap - 45, scale_pct, "label"),
+        HorizontalSpan:new{ width = header_gap },
+        textWidget(_("NO. 01"), 45, scale_pct, "label"),
+    }
     addDivider(group, width)
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
-
-    local rows = {
-        { _("Window"), T(_("Last %1 days"), days) },
-        { _("History span"), T(_("%1 of %2 days"), getObservedDays(snapshot), days) },
-        { _("Books opened"), tostring(snapshot.book_count) },
-        { _("Reading time"), T(_("%1 minutes"), snapshot.total_minutes) },
+    group[#group + 1] = textWidget(label, width, scale_pct, "display")
+    group[#group + 1] = textWidget(
+        _("Profile classification · descriptive, not diagnostic"),
+        width, scale_pct, "muted")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
+    local coverage = VerticalGroup:new{ align = "left",
+        textWidget(_("DATA COVERAGE"), width - Kit.sc(scale_pct)(120), scale_pct, "label"),
+        textWidget(T(_("%1 within %2 selected days"), getCoverageText(snapshot), days),
+            width - Kit.sc(scale_pct)(120), scale_pct, "normal"),
     }
-    for _, row in ipairs(rows) do
-        group[#group + 1] = textWidget(T(_("%1 · %2"), row[1], row[2]), width, scale_pct, "normal")
-        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
-        addDivider(group, width)
-        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) }
-    end
+    local cover_row = HorizontalGroup:new{ align = "center",
+        coverage,
+        HorizontalSpan:new{ width = Kit.sc(scale_pct)(8) },
+        textWidget(snapshot.evidence and _("EVIDENCE MET") or _("PROVISIONAL"),
+            Kit.sc(scale_pct)(88), scale_pct, "label"),
+    }
+    group[#group + 1] = frameWidget(cover_row, scale_pct, width)
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
+    addDivider(group, width)
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
+    local triptych_gap = Kit.sc(scale_pct)(10)
+    local triptych_width = math.max(1, math.floor((width - 2 * triptych_gap) / 3))
+    group[#group + 1] = HorizontalGroup:new{ align = "top",
+        renderLeadStat(T(_("%1/%2"), snapshot.active_days, getObservedDays(snapshot)),
+            _("Days read"), triptych_width, scale_pct),
+        HorizontalSpan:new{ width = triptych_gap },
+        renderLeadStat(tostring(snapshot.book_count), _("Books"), triptych_width, scale_pct),
+        HorizontalSpan:new{ width = triptych_gap },
+        renderLeadStat(tostring(snapshot.total_minutes), _("Minutes"), triptych_width, scale_pct),
+    }
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(6) }
+    addDivider(group, width)
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
     group[#group + 1] = textWidget(_("MEASURE  ·  OBSERVED"), width, scale_pct, "label")
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
-    for index, metric in ipairs(snapshot.metrics) do
-        group[#group + 1] = textWidget(
-            T(_("%1  ·  %2"), metric.label, metric.raw or metric.confidence_hint or _("Not available")),
-            width, scale_pct, "normal")
-        if show_scores and metric.score then
-            group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
-            group[#group + 1] = Kit.progressBar{
-                width = math.max(50, width), height = Kit.sc(scale_pct)(4), fraction = metric.score / 100,
-            }
-            group[#group + 1] = textWidget(T(_("Score %1 / 100"), metric.score), width, scale_pct, "muted")
-        end
-        if index < #snapshot.metrics then
-            group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(6) }
-            addDivider(group, width)
-            group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(6) }
-        end
+    local ledger = {
+        { metricByKey(snapshot, "depth"), _("SESSION DEPTH") },
+        { metricByKey(snapshot, "loyalty"), _("BOOK LOYALTY") },
+        { metricByKey(snapshot, "exploration"), _("EXPLORATION") },
+        { metricByKey(snapshot, "night"), _("NIGHT READING") },
+        { metricByKey(snapshot, "switching"), _("BOOK SWITCHES") },
+    }
+    for index = 1, #ledger do
+        local metric = ledger[index][1]
+        local raw = metric and metric.raw or _("Not available")
+        local row = HorizontalGroup:new{ align = "center",
+            textWidget(ledger[index][2], width * 0.42, scale_pct, "label"),
+            HorizontalSpan:new{ width = Kit.sc(scale_pct)(8) },
+            textWidget(raw, width * 0.52, scale_pct, "metric_value"),
+        }
+        group[#group + 1] = row
+        addDivider(group, width)
     end
-    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) }
-    group[#group + 1] = textWidget(
-        T(_("%1 author credits · Finished books not tracked reliably"), snapshot.author_count),
-        width, scale_pct, "muted")
-    addTrend(group, snapshot, width, scale_pct, days)
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) }
+    local foot_width = math.max(1, width - Kit.sc(scale_pct)(120))
+    local foot = VerticalGroup:new{ align = "left",
+        textWidget(snapshot.evidence and _("* Enough data for pattern labels.") or _("* Profile remains provisional."),
+            foot_width, scale_pct, "muted"),
+        textWidget(_("Finished books not tracked reliably."), foot_width, scale_pct, "muted"),
+    }
+    group[#group + 1] = HorizontalGroup:new{ align = "top",
+        foot,
+        HorizontalSpan:new{ width = Kit.sc(scale_pct)(8) },
+        renderBarcode(Kit.sc(scale_pct)(100), scale_pct),
+    }
     return group
 end
 
 local function renderBookSpines(book_count, width, scale_pct)
     local Widget = require("ui/widget/widget")
     local Geom = require("ui/geometry")
-    local height = Kit.sc(scale_pct)(62)
-    local spine_width = math.max(3, Kit.sc(scale_pct)(12))
+    local height = Kit.sc(scale_pct)(100)
+    local shelf_height = Kit.sc(scale_pct)(4)
+    local count = math.max(1, math.min(tonumber(book_count) or 0, 24))
     local gap = math.max(2, Kit.sc(scale_pct)(5))
-    local count = math.min(book_count, 24, math.max(1, math.floor((width + gap) / (spine_width + gap))))
-    local total_width = count * (spine_width + gap) - gap
+    local spine_heights = {}
+    for i = 1, count do
+        spine_heights[i] = math.random(46, 75) / 100
+    end
     local WidgetClass = Widget:extend{}
-    function WidgetClass:getSize() return Geom:new{ w = total_width, h = height } end
+    function WidgetClass:getSize() return Geom:new{ w = width, h = height } end
     function WidgetClass:paintTo(bb, x, y)
         for i = 1, count do
-            local h = math.floor(height * (0.48 + ((i * 7) % 9) / 20))
-            local sx = x + (i - 1) * (spine_width + gap)
-            local sy = y + height - h
+            local slot_x = math.floor((i - 1) * width / count)
+            local slot_end = math.floor(i * width / count)
+            local spine_width = math.max(1, slot_end - slot_x - gap)
+            local h = math.floor((height - shelf_height) * spine_heights[i])
+            local sx = x + slot_x
+            local sy = y + height - shelf_height - h
             bb:paintRect(sx, sy, spine_width, h, Kit.COLOR_PRIMARY)
             if spine_width > 2 and h > 3 then
                 local fill = i % 3 == 0 and Kit.COLOR_MUTED or Kit.CARD_BG
                 bb:paintRect(sx + 1, sy + 1, spine_width - 2, h - 2, fill)
             end
         end
+        bb:paintRect(x, y + height - shelf_height, width, shelf_height, Kit.COLOR_PRIMARY)
     end
     return WidgetClass:new{}
 end
@@ -696,28 +882,61 @@ end
 local function renderFingerprint(snapshot, label, width, scale_pct, days, show_scores)
     local VerticalGroup = require("ui/widget/verticalgroup")
     local VerticalSpan = require("ui/widget/verticalspan")
+    local HorizontalGroup = require("ui/widget/horizontalgroup")
+    local HorizontalSpan = require("ui/widget/horizontalspan")
     local group = VerticalGroup:new{ align = "left" }
-    group[#group + 1] = textWidget(_("Your reading fingerprint"), width, scale_pct, "label")
-    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
-    group[#group + 1] = textWidget(label, width, scale_pct, "title")
+    local header_gap = Kit.sc(scale_pct)(10)
+    group[#group + 1] = HorizontalGroup:new{ align = "top",
+        textWidget(_("YOUR READING FINGERPRINT"), width - header_gap - 55, scale_pct, "label"),
+        HorizontalSpan:new{ width = header_gap },
+        textWidget(T(_("%1d"), days), 55, scale_pct, "label"),
+    }
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(4) }
+    group[#group + 1] = textWidget(label, width, scale_pct, "display")
     group[#group + 1] = textWidget(
-        T(_("%1 active · %2 books · stats %3 / %4 days"),
-            snapshot.active_days, snapshot.book_count, getObservedDays(snapshot), days),
+        T(_("%1 reading days · stats %2"), snapshot.active_days, getCoverageText(snapshot)),
         width, scale_pct, "normal")
-    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) }
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
     group[#group + 1] = renderBookSpines(snapshot.book_count, width, scale_pct)
-    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
-    group[#group + 1] = textWidget(T(_("%1 minutes read · %2 author credits"), snapshot.total_minutes, snapshot.author_count),
-        width, scale_pct, "muted")
-    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) }
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(4) }
+    group[#group + 1] = HorizontalGroup:new{ align = "top",
+        textWidget(T(_("%1 books opened"), snapshot.book_count), width * 0.48, scale_pct, "muted"),
+        HorizontalSpan:new{ width = header_gap },
+        textWidget(T(_("%1 min recorded"), snapshot.total_minutes), width * 0.48, scale_pct, "muted"),
+    }
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(9) }
     addDivider(group, width)
-    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
-    renderMetricGrid(group, snapshot.metrics, width, scale_pct, show_scores)
-    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
-    group[#group + 1] = textWidget(
-        T(_("Coverage: %1 of %2 selected days"), getObservedDays(snapshot), days),
-        width, scale_pct, "muted")
-    addTrend(group, snapshot, width, scale_pct, days)
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) }
+    local score_gap = Kit.sc(scale_pct)(10)
+    local tile_width = math.max(1, math.floor((width - score_gap) / 2))
+    local tile_inner = math.max(1, tile_width - Kit.sc(scale_pct)(12))
+    local tile_notes = {
+        _("active days"), _("median · recorded sessions"), _("focused days"),
+        _("books + author credits"), _("of recorded time"), _("switches / sessions"),
+    }
+    local tile_titles = {
+        _("Consistency"), _("Session depth"), _("Book loyalty"),
+        _("Exploration"), _("Night reading"), _("Book changes"),
+    }
+    for index = 1, #snapshot.metrics, 2 do
+        local left = renderScoreTile(snapshot.metrics[index], tile_titles[index], tile_notes[index], tile_inner, scale_pct)
+        local right = snapshot.metrics[index + 1]
+            and renderScoreTile(snapshot.metrics[index + 1], tile_titles[index + 1],
+                tile_notes[index + 1], tile_inner, scale_pct)
+            or HorizontalSpan:new{ width = tile_width }
+        group[#group + 1] = HorizontalGroup:new{ align = "top",
+            left,
+            HorizontalSpan:new{ width = score_gap },
+            right,
+        }
+        if index + 1 < #snapshot.metrics then group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) } end
+    end
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) }
+    group[#group + 1] = HorizontalGroup:new{ align = "top",
+        textWidget(T(_("Coverage: %1 of %2 days"), getObservedDays(snapshot), days), width * 0.56, scale_pct, "muted"),
+        HorizontalSpan:new{ width = header_gap },
+        textWidget(T(_("PROFILE  ·  %1"), label), width * 0.42, scale_pct, "label"),
+    }
     return group
 end
 
