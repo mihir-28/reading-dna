@@ -12,6 +12,8 @@ The stats adapter resolves `statistics.sqlite3` through `datastorage`, opens it 
 
 Rendering never queries SQLite. Tap schedules read-only query batches of up to 100 rows across UI ticks, then persists only the aggregate snapshot. Preview draws static sample text. Missing DB, failed query, empty history, and pending analysis have separate UI states.
 
+The tap reads twice the selected period once. The calculation splits those rows into current and immediately previous equal-length local-calendar windows. It reports active-day and minute deltas only when each window has at least 3 active days and 30 recorded minutes.
+
 ## Known measurement limits
 
 - A “session” is inferred from event timestamps and a 20-minute gap; KOReader does not store a session ID in this table.

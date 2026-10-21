@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 — Reading trends
+
+- Compare active days and recorded minutes across adjacent equal-length windows.
+- Show trends only when both windows meet minimum evidence thresholds.
+- Reuse one asynchronous 2-window read for current metrics and comparison.
+
 ## 0.1.4 — Responsive analysis
 
 - Read statistics in bounded 100-row batches scheduled across UI ticks.

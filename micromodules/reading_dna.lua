@@ -7,7 +7,7 @@ local T = require("ffi/util").template
 local Kit = require("lib/bookshelf_module_kit")
 
 local MODULE_KEY = "reading_dna"
-local MODULE_VERSION = "0.1.4"
+local MODULE_VERSION = "0.2.0"
 local DEFAULT_WINDOW = 30
 local SESSION_GAP = 20 * 60
 local MIN_SESSION = 60
@@ -162,7 +162,7 @@ local function readEvents(days, night_start, night_end)
             step = statement:step()
         end
         statement:close()
-        return { events = rows, now = now, window_start = first, first_event = first_event }
+        return { events = rows, now = now, window_start = first, first_event = first_event, days = days }
     end)
     if connection then pcall(connection.close, connection) end
     if not ok then
@@ -240,7 +240,7 @@ local function readEventsAsync(days, onComplete)
         pcall(state.statement.close, state.statement)
         pcall(state.connection.close, state.connection)
         onComplete({ events = state.events, now = state.now,
-            window_start = state.window_start, first_event = state.first_event })
+            window_start = state.window_start, first_event = state.first_event, days = days })
     end
     require("ui/uimanager"):scheduleIn(0.01, processBatch)
 end
@@ -281,10 +281,7 @@ local function sessionize(events)
     return valid, lengths, switches
 end
 
-local function calculate(days, night_start, night_end, provided_result, provided_error)
-    local result, err = provided_result, provided_error
-    if not result and not err then result, err = readEvents(days, night_start, night_end) end
-    if not result then return nil, err end
+local function calculateSingle(days, night_start, night_end, result)
     local raw_events = result.events
     local events = normalizeEvents(raw_events)
     if #events == 0 then return { empty = true, days = days, analyzed_at = result.now } end
@@ -371,6 +368,45 @@ local function calculate(days, night_start, night_end, provided_result, provided
         archetype = archetype,
         metrics = metrics,
     }
+end
+
+local function calculate(days, night_start, night_end, provided_result, provided_error)
+    local result, err = provided_result, provided_error
+    if not result and not err then result, err = readEvents(days, night_start, night_end) end
+    if not result then return nil, err end
+
+    -- Trends compare two complete, adjacent windows of equal length.
+    if result.days and result.days >= days * 2 then
+        local current_start = windowStart(result.now, days)
+        local previous_end = current_start - 1
+        local previous_start = windowStart(previous_end, days)
+        local current_events, previous_events = {}, {}
+        for _, event in ipairs(result.events) do
+            if event.time >= current_start and event.time <= result.now then
+                current_events[#current_events + 1] = event
+            elseif event.time >= previous_start and event.time <= previous_end then
+                previous_events[#previous_events + 1] = event
+            end
+        end
+        local current = calculateSingle(days, night_start, night_end, {
+            events = current_events, now = result.now, window_start = current_start,
+            first_event = result.first_event,
+        })
+        local previous = calculateSingle(days, night_start, night_end, {
+            events = previous_events, now = previous_end, window_start = previous_start,
+            first_event = result.first_event,
+        })
+        if not current.empty and not previous.empty
+                and current.active_days >= 3 and previous.active_days >= 3
+                and current.total_minutes >= 30 and previous.total_minutes >= 30 then
+            current.trend = {
+                days = current.active_days - previous.active_days,
+                minutes = current.total_minutes - previous.total_minutes,
+            }
+        end
+        return current
+    end
+    return calculateSingle(days, night_start, night_end, result)
 end
 
 local function getWindow(ctx)
@@ -535,6 +571,15 @@ local function render(ctx)
     end
     if full then
         group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(18) }
+        if snapshot.trend then
+            local function signed(value)
+                return value > 0 and ("+" .. value) or tostring(value)
+            end
+            group[#group + 1] = textWidget(
+                T(_("Vs prior %1d: %2 days · %3 min"), days,
+                    signed(snapshot.trend.days), signed(snapshot.trend.minutes)),
+                width, scale_pct, "muted")
+        end
         group[#group + 1] = textWidget(
             T(_("%1 min · %2 credits"), snapshot.total_minutes, snapshot.author_count),
             width, scale_pct, "muted")
@@ -619,7 +664,7 @@ local module = {
         local night_start, night_end = selected_night[1], selected_night[2]
         store:set("snapshot", { pending = true, days = days })
         if _refresh then _refresh() end
-        readEventsAsync(days, function(result, err)
+        readEventsAsync(days * 2, function(result, err)
             analysis_pending = false
             local snapshot
             if result then
@@ -642,6 +687,7 @@ if rawget(_G, "READING_DNA_TEST") then
         localDateKey = localDateKey,
         readEvents = readEvents,
         readEventsAsync = readEventsAsync,
+        calculate = calculate,
     }
 end
 

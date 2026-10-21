@@ -123,4 +123,30 @@ equal(#async_result.events, 250, "async event count")
 equal(scheduled_batches, 3, "async batch count")
 equal(stmt_closed and conn_closed, true, "async handles closed")
 
+-- Adjacent equal-length windows report plain deltas only with enough evidence.
+local now_parts = os.date("*t", os.time({ year = 2026, month = 10, day = 21, hour = 12 }))
+local trend_now = os.time(now_parts)
+local trend_start = os.time({ year = now_parts.year, month = now_parts.month,
+    day = now_parts.day - 59, hour = 0, min = 0, sec = 0 })
+local trend_events = {}
+for _, offset in ipairs({ 45, 40, 35, 8, 5, 2 }) do
+    local date = { year = now_parts.year, month = now_parts.month,
+        day = now_parts.day - offset, hour = 10, min = 0, sec = 0 }
+    trend_events[#trend_events + 1] = {
+        book = "book", time = os.time(date), duration = 20 * 60, authors = "Writer",
+    }
+end
+local trend = test.calculate(30, 21, 4, {
+    days = 60, events = trend_events, now = trend_now,
+    window_start = trend_start, first_event = trend_events[1].time,
+})
+equal(trend.trend.days, 0, "equal-window active-day delta")
+equal(trend.trend.minutes, 0, "equal-window minute delta")
+local sparse_events = { trend_events[1], trend_events[2], trend_events[3], trend_events[4] }
+local sparse = test.calculate(30, 21, 4, {
+    days = 60, events = sparse_events, now = trend_now,
+    window_start = trend_start, first_event = sparse_events[1].time,
+})
+equal(sparse.trend, nil, "insufficient evidence hides trend")
+
 print(string.format("Reading DNA: %d regression checks passed", passed))

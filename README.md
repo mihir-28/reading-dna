@@ -2,7 +2,7 @@
 
 Offline reading profile for KOReader's Bookshelf micro-modules. It summarizes recent reading patterns as consistency, inferred session depth, book loyalty, exploration, night reading, and book switching.
 
-Current development version: `0.1.4`.
+Current development version: `0.2.0`.
 
 Reading DNA is a descriptive, playful summary, not a psychological assessment. Scores are hidden when evidence is too limited. Archetypes stay provisional until the selected window contains at least 14 active days and 5 hours of recorded reading.
 
@@ -43,6 +43,8 @@ Changing a setting clears the cached summary. Tap the card to recalculate.
 - **Exploration:** half the score comes from distinct books (10 reaches that half's maximum); half from distinct author metadata credits (5 reaches that half's maximum); requires 3 books. KOReader stores authors as free-form text, so each complete metadata string counts as one credit rather than guessing at comma-separated names.
 - **Night reading:** share of recorded reading seconds inside the selected night interval; requires at least 60 minutes.
 - **Book switching:** share of adjacent inferred sessions involving a different book; requires at least 4 sessions.
+
+The full-screen view compares active days and recorded minutes with the immediately preceding window of equal length. Trends appear only when both windows have at least 3 active days and 30 minutes recorded.
 
 Overlapping event intervals are clipped to the earliest event, preventing duplicated reading time. Scores are simple descriptive scales, not validated measures. Archetype rules use thresholds: Deep Diver (depth and loyalty ≥65), Explorer (exploration ≥65), Marathoner (depth ≥60 and consistency ≥65), Night Owl (night reading ≥60), and Wanderer (switching ≥70). The evidence gate applies before assigning an archetype. Otherwise, the card shows Mixed Reader provisionally.
 
