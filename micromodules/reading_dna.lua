@@ -7,7 +7,7 @@ local T = require("ffi/util").template
 local Kit = require("lib/bookshelf_module_kit")
 
 local MODULE_KEY = "reading_dna"
-local MODULE_VERSION = "0.1.3"
+local MODULE_VERSION = "0.1.4"
 local DEFAULT_WINDOW = 30
 local SESSION_GAP = 20 * 60
 local MIN_SESSION = 60
@@ -17,6 +17,7 @@ local MIN_TOTAL_SECONDS = 5 * 60 * 60
 
 local store = Kit.moduleStore(MODULE_KEY)
 local _refresh
+local analysis_pending = false
 
 local function clamp(value, low, high)
     return math.max(low, math.min(high, value))
@@ -171,6 +172,79 @@ local function readEvents(days, night_start, night_end)
     return result
 end
 
+-- Yield between bounded batches so even large statistics databases leave time
+-- for Kindle UI events. Only explicit user-triggered analysis reaches this path.
+local function readEventsAsync(days, onComplete)
+    local DataStorage = require("datastorage")
+    local path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
+    local lfs = require("libs/libkoreader-lfs")
+    if lfs.attributes(path, "mode") ~= "file" then
+        onComplete(nil, "missing_db")
+        return
+    end
+
+    local now = os.time()
+    local first = windowStart(now, days)
+    local state = { events = {}, now = now, window_start = first }
+    local ok, err = pcall(function()
+        local SQLite = require("lua-ljsqlite3/init")
+        state.connection = SQLite.open(path, "ro")
+        state.connection:exec("PRAGMA busy_timeout=200;")
+        state.statement = state.connection:prepare([[
+            SELECT p.id_book, p.start_time, p.duration, COALESCE(b.authors, ''),
+                   (SELECT MIN(start_time) FROM page_stat_data WHERE duration > 0)
+            FROM page_stat_data AS p
+            LEFT JOIN book AS b ON b.id = p.id_book
+            WHERE p.start_time >= ? AND p.start_time <= ? AND p.duration > 0
+            ORDER BY p.start_time ASC
+        ]])
+        state.row = state.statement:bind(first, now):step()
+        state.first_event = tonumber(state.row and state.row[5])
+    end)
+    if not ok then
+        if state.connection then pcall(state.connection.close, state.connection) end
+        require("logger").warn("[reading_dna] statistics read failed:", err)
+        onComplete(nil, "query_error")
+        return
+    end
+
+    local function processBatch()
+        local batch_ok, batch_err = pcall(function()
+            local processed = 0
+            while state.row and processed < 100 do
+                local timestamp = tonumber(state.row[2])
+                local duration = tonumber(state.row[3])
+                if timestamp and duration and duration > 0 then
+                    state.events[#state.events + 1] = {
+                        book = tostring(state.row[1] or "unknown"),
+                        time = timestamp,
+                        duration = math.min(duration, 12 * 60 * 60),
+                        authors = tostring(state.row[4] or ""),
+                    }
+                end
+                processed = processed + 1
+                state.row = state.statement:step()
+            end
+        end)
+        if not batch_ok then
+            pcall(state.statement.close, state.statement)
+            pcall(state.connection.close, state.connection)
+            require("logger").warn("[reading_dna] statistics read failed:", batch_err)
+            onComplete(nil, "query_error")
+            return
+        end
+        if state.row then
+            require("ui/uimanager"):scheduleIn(0.01, processBatch)
+            return
+        end
+        pcall(state.statement.close, state.statement)
+        pcall(state.connection.close, state.connection)
+        onComplete({ events = state.events, now = state.now,
+            window_start = state.window_start, first_event = state.first_event })
+    end
+    require("ui/uimanager"):scheduleIn(0.01, processBatch)
+end
+
 local function sessionize(events)
     local sessions = {}
     local current
@@ -207,8 +281,9 @@ local function sessionize(events)
     return valid, lengths, switches
 end
 
-local function calculate(days, night_start, night_end)
-    local result, err = readEvents(days, night_start, night_end)
+local function calculate(days, night_start, night_end, provided_result, provided_error)
+    local result, err = provided_result, provided_error
+    if not result and not err then result, err = readEvents(days, night_start, night_end) end
     if not result then return nil, err end
     local raw_events = result.events
     local events = normalizeEvents(raw_events)
@@ -399,6 +474,13 @@ local function render(ctx)
             sub = message,
         }
     end
+    if snapshot.pending then
+        return Kit.valueCard{
+            width = width, scale_pct = scale_pct,
+            heading = _("Reading DNA"), value = _("Analyzing…"),
+            sub = _("Reading statistics in small batches"),
+        }
+    end
     if snapshot.empty then
         return Kit.valueCard{
             width = width, scale_pct = scale_pct,
@@ -526,6 +608,8 @@ local module = {
     keep_open = true,
     render = render,
     on_tap = function(ctx)
+        if analysis_pending then return end
+        analysis_pending = true
         local days = getWindow(ctx)
         local night_window = ctx.config:get("night_window", "21-04")
         local night_hours = {
@@ -533,17 +617,18 @@ local module = {
         }
         local selected_night = night_hours[night_window] or night_hours["21-04"]
         local night_start, night_end = selected_night[1], selected_night[2]
-        local snapshot, err = calculate(days, night_start, night_end)
-        if snapshot then
-            store:set("snapshot", snapshot)
-        else
-            store:set("snapshot", {
-                error = err,
-                days = days,
-                analyzed_at = os.time(),
-            })
-        end
+        store:set("snapshot", { pending = true, days = days })
         if _refresh then _refresh() end
+        readEventsAsync(days, function(result, err)
+            analysis_pending = false
+            local snapshot
+            if result then
+                snapshot, err = calculate(days, night_start, night_end, result)
+            end
+            if snapshot then store:set("snapshot", snapshot)
+            else store:set("snapshot", { error = err, days = days, analyzed_at = os.time() }) end
+            if _refresh then _refresh() end
+        end)
     end,
     show_settings = showSettings,
 }
@@ -556,6 +641,7 @@ if rawget(_G, "READING_DNA_TEST") then
         observedDayCount = observedDayCount,
         localDateKey = localDateKey,
         readEvents = readEvents,
+        readEventsAsync = readEventsAsync,
     }
 end
 

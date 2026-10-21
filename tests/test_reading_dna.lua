@@ -81,4 +81,46 @@ equal(result, nil, "schema failure result")
 equal(err, "query_error", "schema failure state")
 equal(closed, true, "database handle closed")
 
+-- Large reads yield after each 100-row batch and close at completion.
+local queue, scheduled_batches = {}, 0
+package.preload["ui/uimanager"] = function()
+    return { scheduleIn = function(_, _, callback)
+        scheduled_batches = scheduled_batches + 1
+        queue[#queue + 1] = callback
+    end }
+end
+local rows, row_index = {}, 0
+for index = 1, 250 do
+    rows[index] = { "book", 1000 + index * 10, 5, "Writer", 500 }
+end
+local stmt_closed, conn_closed = false, false
+package.preload["lua-ljsqlite3/init"] = function()
+    return { open = function()
+        return {
+            exec = function() end,
+            prepare = function()
+                return {
+                    bind = function(self) return self end,
+                    step = function()
+                        row_index = row_index + 1
+                        return rows[row_index]
+                    end,
+                    close = function() stmt_closed = true end,
+                }
+            end,
+            close = function() conn_closed = true end,
+        }
+    end }
+end
+package.loaded["lua-ljsqlite3/init"] = nil
+local async_result, async_error
+test.readEventsAsync(30, function(result_value, error_value)
+    async_result, async_error = result_value, error_value
+end)
+while #queue > 0 do table.remove(queue, 1)() end
+equal(async_error, nil, "async query error")
+equal(#async_result.events, 250, "async event count")
+equal(scheduled_batches, 3, "async batch count")
+equal(stmt_closed and conn_closed, true, "async handles closed")
+
 print(string.format("Reading DNA: %d regression checks passed", passed))

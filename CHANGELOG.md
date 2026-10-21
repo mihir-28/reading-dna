@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4 — Responsive analysis
+
+- Read statistics in bounded 100-row batches scheduled across UI ticks.
+- Show an analyzing state and prevent duplicate concurrent refreshes.
+- Keep SQLite access read-only and close statements/connections on success or failure.
+
 ## 0.1.3 — Regression coverage
 
 - Add synthetic interval, metadata, calendar-window, and database-error regression tests.

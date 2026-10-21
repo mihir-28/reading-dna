@@ -10,7 +10,7 @@ The module uses Bookshelf's `lib/bookshelf_module_kit` for value cards, scaling,
 
 The stats adapter resolves `statistics.sqlite3` through `datastorage`, opens it with SQLite read-only mode, sets a short busy timeout, uses a parameterized time range, and closes the connection after each explicit analysis. It selects raw `page_stat_data` rows joined to `book`. Do not switch to `page_stat`: that view expands/rescales page rows and is not the event source for session grouping.
 
-Rendering never queries SQLite. Tap triggers calculation and persists only the aggregate snapshot. Preview draws static sample text. Missing DB, failed query, and empty history have separate UI states.
+Rendering never queries SQLite. Tap schedules read-only query batches of up to 100 rows across UI ticks, then persists only the aggregate snapshot. Preview draws static sample text. Missing DB, failed query, empty history, and pending analysis have separate UI states.
 
 ## Known measurement limits
 
