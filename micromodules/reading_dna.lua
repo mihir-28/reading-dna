@@ -7,7 +7,7 @@ local T = require("ffi/util").template
 local Kit = require("lib/bookshelf_module_kit")
 
 local MODULE_KEY = "reading_dna"
-local MODULE_VERSION = "0.1.2"
+local MODULE_VERSION = "0.1.3"
 local DEFAULT_WINDOW = 30
 local SESSION_GAP = 20 * 60
 local MIN_SESSION = 60
@@ -518,7 +518,7 @@ showSettings = function(ctx)
     UIManager:show(dialog)
 end
 
-return {
+local module = {
     key = MODULE_KEY,
     version = MODULE_VERSION,
     title = _("Reading DNA"),
@@ -547,3 +547,16 @@ return {
     end,
     show_settings = showSettings,
 }
+
+-- Private test seam; absent in KOReader production unless explicitly enabled.
+if rawget(_G, "READING_DNA_TEST") then
+    module._test = {
+        normalizeEvents = normalizeEvents,
+        countAuthorCredits = countAuthorCredits,
+        observedDayCount = observedDayCount,
+        localDateKey = localDateKey,
+        readEvents = readEvents,
+    }
+end
+
+return module

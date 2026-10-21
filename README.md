@@ -2,7 +2,7 @@
 
 Offline reading profile for KOReader's Bookshelf micro-modules. It summarizes recent reading patterns as consistency, inferred session depth, book loyalty, exploration, night reading, and book switching.
 
-Current development version: `0.1.2`.
+Current development version: `0.1.3`.
 
 Reading DNA is a descriptive, playful summary, not a psychological assessment. Scores are hidden when evidence is too limited. Archetypes stay provisional until the selected window contains at least 14 active days and 5 hours of recorded reading.
 
@@ -63,6 +63,9 @@ micromodules/
   reading_dna.lua              Installable Bookshelf module
 docs/
   DEVELOPMENT.md               Architecture and implementation notes
+tests/
+  test_reading_dna.lua          Lua regression checks
+.github/workflows/test.yml     Lua 5.1 test workflow
 CHANGELOG.md                    Release history
 LICENSE                         AGPL-3.0-only
 README.md                       User and installation guide

@@ -29,6 +29,10 @@ Rendering never queries SQLite. Tap triggers calculation and persists only the a
 - Check 167-ppi grayscale legibility and render latency.
 - Back up Bookshelf settings before copying the module; uninstall by removing the module file.
 
+## Regression tests
+
+Run `lua tests/test_reading_dna.lua` with Lua 5.1. Synthetic checks cover empty and short histories, interval overlaps, free-form author metadata, local calendar boundaries, and query/schema errors. The production module exposes these helpers only when the global `READING_DNA_TEST` flag is set by the test runner.
+
 ## Local references
 
 Device-source snapshots and the inspection summary are kept in the workspace's ignored `references/` folder. They are excluded from this repository so version snapshots and local development material do not ship with the module.

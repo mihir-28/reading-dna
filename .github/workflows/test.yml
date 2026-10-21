@@ -1,0 +1,16 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lua-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+      - name: Run regression tests
+        run: lua tests/test_reading_dna.lua

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3 — Regression coverage
+
+- Add synthetic interval, metadata, calendar-window, and database-error regression tests.
+- Keep test helpers out of the production module unless test mode is explicitly enabled.
+
 ## 0.1.2 — Metric accuracy
 
 - Clip overlapping event time to prevent double-counting durations and session lengths.
