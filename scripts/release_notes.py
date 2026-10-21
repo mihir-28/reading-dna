@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract release notes from the matching CHANGELOG.md section."""
+"""Extract unreleased changelog sections for a GitHub release."""
 
 from __future__ import annotations
 
@@ -35,9 +35,13 @@ def extract(text: str, version: str, since: str | None = None) -> str:
     if since:
         if since not in versions:
             raise ValueError(f"CHANGELOG.md missing lower bound {since}")
-        end = versions.index(since)
-        if end <= start:
+        since_index = versions.index(since)
+        if since_index == start:
+            end = start + 1
+        elif since_index < start:
             raise ValueError(f"Lower bound {since} must follow {version}")
+        else:
+            end = since_index
     selected = [section for _, section in parsed[start:end]]
     return "\n\n".join(selected)
 

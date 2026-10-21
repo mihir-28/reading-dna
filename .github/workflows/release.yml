@@ -21,10 +21,19 @@ jobs:
       - name: Prepare release notes from changelog
         id: notes
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          python scripts/release_notes.py --version "$version" --output dist/release-notes.md
+          previous_tag="$(curl -fsS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "User-Agent: ReadingDNA-release" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/latest" 2>/dev/null \
+            | python -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
+          previous_version="${previous_tag#v}"
+          python scripts/release_notes.py --version "$version" --since "$previous_version" --output dist/release-notes.md
       - uses: softprops/action-gh-release@v2
         with:
           name: Reading DNA ${{ steps.notes.outputs.version }}
