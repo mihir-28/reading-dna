@@ -190,23 +190,26 @@ local function calculate(days, night_start, night_end)
     for _ in pairs(authors) do author_count = author_count + 1 end
 
     local metrics = {
-        { key = "consistency", label = _("Consistency"), raw = T(_("%1 of %2 days"), active_days, observed_days),
+        { key = "consistency", label = _("Consistency"), raw = T(_("%1 / %2 days"), active_days, observed_days),
             score = active_days >= 3 and clamp(consistency, 0, 100) or nil,
-            sample = active_days, available = active_days >= 3 and total_seconds >= 30 * 60 },
-        { key = "depth", label = _("Session depth"), raw = median_session and T(_("%1 min median"), math.floor(median_session / 60 + 0.5)) or nil,
+            sample = active_days, available = active_days >= 3 and total_seconds >= 30 * 60,
+            confidence_hint = active_days < 3 and _("Need 3 active days") or _("Need 30 minutes recorded") },
+        { key = "depth", label = _("Session depth"), raw = median_session and T(_("%1 min median session"), math.floor(median_session / 60 + 0.5)) or nil,
             score = median_session and clamp(median_session / (60 * 60) * 100, 0, 100) or nil,
-            sample = #sessions, available = #sessions >= 3 },
-        { key = "loyalty", label = _("Book loyalty"), raw = T(_("%1 of %2 days focused"), loyal_days, active_days),
-            score = active_days > 0 and 100 * loyal_days / active_days or nil, sample = active_days, available = active_days >= 5 },
+            sample = #sessions, available = #sessions >= 3, confidence_hint = _("Need 3 valid sessions") },
+        { key = "loyalty", label = _("Book loyalty"), raw = T(_("%1 / %2 focused days"), loyal_days, active_days),
+            score = active_days > 0 and 100 * loyal_days / active_days or nil, sample = active_days,
+            available = active_days >= 5, confidence_hint = _("Need 5 active days") },
         { key = "exploration", label = _("Exploration"), raw = T(_("%1 books · %2 authors"), book_count, author_count),
             score = clamp(50 * math.min(1, book_count / 10) + 50 * math.min(1, author_count / 5), 0, 100),
-            sample = book_count, available = book_count >= 3 },
-        { key = "night", label = _("Night reading"), raw = total_seconds > 0 and T(_("%1% of reading time"), math.floor(100 * late_seconds / total_seconds + 0.5)) or nil,
+            sample = book_count, available = book_count >= 3, confidence_hint = _("Need 3 books") },
+        { key = "night", label = _("Night reading"), raw = total_seconds > 0 and T(_("%1% of read time"), math.floor(100 * late_seconds / total_seconds + 0.5)) or nil,
             score = total_seconds > 0 and 100 * late_seconds / total_seconds or nil,
-            sample = math.floor(total_seconds / 60), available = total_seconds >= 60 * 60 },
-        { key = "switching", label = _("Book switching"), raw = T(_("%1 switches across %2 sessions"), switches, #sessions),
+            sample = math.floor(total_seconds / 60), available = total_seconds >= 60 * 60,
+            confidence_hint = _("Need 60 minutes recorded") },
+        { key = "switching", label = _("Book switching"), raw = T(_("%1 switches · %2 sessions"), switches, #sessions),
             score = #sessions > 1 and 100 * switches / (#sessions - 1) or nil,
-            sample = #sessions, available = #sessions >= 4 },
+            sample = #sessions, available = #sessions >= 4, confidence_hint = _("Need 4 valid sessions") },
     }
 
     for _, metric in ipairs(metrics) do
@@ -252,30 +255,59 @@ local function getSnapshot(days)
     return nil
 end
 
-local function textWidget(text, width, scale_pct, muted)
+local function textWidget(text, width, scale_pct, role)
     local TextWidget = require("lib/bookshelf_colour_text")
+    local opts = (role == "title" or role == "value") and { bold = true } or nil
+    local size = role == "title" and 24 or (role == "value" and 17 or 13)
+    local face, bold = Kit.face(size, scale_pct, opts)
     return TextWidget:new{
         text = text,
-        face = Kit.face(14, scale_pct),
-        fgcolor = muted and Kit.COLOR_MUTED or Kit.COLOR_PRIMARY,
+        face = face,
+        bold = bold,
+        fgcolor = (role == "muted" or role == "label") and Kit.COLOR_MUTED or Kit.COLOR_PRIMARY,
         max_width = width,
     }
 end
 
 local function renderMetric(metric, width, scale_pct, show_scores)
     local score = metric.score
-    local value = show_scores and score and (tostring(score) .. "/100") or metric.raw or _("Not enough data")
-    local bar = show_scores and score and Kit.progressBar{
-        width = math.max(50, width), height = Kit.sc(scale_pct)(5), fraction = score / 100,
-    } or nil
-    return Kit.valueCard{
-        width = width,
-        scale_pct = scale_pct,
-        heading = metric.label,
-        value = value,
-        bar = bar,
-        context = show_scores and metric.raw or nil,
-    }
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = textWidget(metric.label, width, scale_pct, "label")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(2) }
+    group[#group + 1] = textWidget(metric.raw or _("No reading data"), width, scale_pct, "value")
+    if show_scores and score then
+        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
+        group[#group + 1] = Kit.progressBar{
+            width = math.max(50, width), height = Kit.sc(scale_pct)(5), fraction = score / 100,
+        }
+        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
+        group[#group + 1] = textWidget(T(_("Score %1 / 100"), score), width, scale_pct, "muted")
+    elseif not score then
+        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
+        group[#group + 1] = textWidget(metric.confidence_hint or _("More reading data needed"), width, scale_pct, "muted")
+    end
+    return group
+end
+
+local function renderProfileHeader(snapshot, label, width, scale_pct, days)
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local group = VerticalGroup:new{ align = "left" }
+    group[#group + 1] = textWidget(label, width, scale_pct, "title")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
+    if not snapshot.evidence then
+        group[#group + 1] = textWidget(_("Provisional profile"), width, scale_pct, "muted")
+    end
+    group[#group + 1] = textWidget(
+        T(_("%1 active · %2 books · %3d"), snapshot.active_days, snapshot.book_count, days),
+        width, scale_pct, "normal")
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
+    group[#group + 1] = textWidget(
+        T(_("Updated %1"), os.date("%b %d, %Y", snapshot.analyzed_at)),
+        width, scale_pct, "muted")
+    return group
 end
 
 local function render(ctx)
@@ -321,16 +353,12 @@ local function render(ctx)
         }
     end
 
-    local provisional = not snapshot.evidence
     local label = ctx.config:get("show_archetype", true) and snapshot.archetype or _("Profile")
-    if provisional then label = T(_("%1 · provisional"), label) end
     local group = require("ui/widget/verticalgroup"):new{ align = "left" }
-    group[#group + 1] = Kit.valueCard{
-        width = width, scale_pct = scale_pct,
-        heading = _("Reading DNA"), value = label,
-        sub = T(_("%1 active days · %2 books"), snapshot.active_days, snapshot.book_count),
-        context = T(_("Last analyzed %1"), os.date("%Y-%m-%d", snapshot.analyzed_at)),
-    }
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local header = renderProfileHeader(snapshot, label, width, scale_pct, days)
+    group[#group + 1] = header
+    group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(16) }
     local full = ctx.surface == "fullscreen"
     local visible_metrics = snapshot.metrics
     if not full then
@@ -342,19 +370,40 @@ local function render(ctx)
             return a.score > b.score
         end)
     end
-    local count = full and #visible_metrics or math.min(2, #visible_metrics)
-    for i = 1, count do
-        local metric = visible_metrics[i]
-        if metric then
-            group[#group + 1] = renderMetric(metric, width, scale_pct, show_scores)
+    if full and width >= Kit.twoColMinWidth() * 1.45 then
+        local HorizontalGroup = require("ui/widget/horizontalgroup")
+        local HorizontalSpan = require("ui/widget/horizontalspan")
+        local gap = Kit.sc(scale_pct)(18)
+        local col_width = math.floor((width - gap) / 2)
+        for index = 1, #visible_metrics, 2 do
+            local row = HorizontalGroup:new{ align = "top",
+                renderMetric(visible_metrics[index], col_width, scale_pct, show_scores),
+                HorizontalSpan:new{ width = gap },
+                visible_metrics[index + 1]
+                    and renderMetric(visible_metrics[index + 1], col_width, scale_pct, show_scores)
+                    or HorizontalSpan:new{ width = col_width },
+            }
+            group[#group + 1] = row
+            if index + 1 < #visible_metrics then
+                group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(18) }
+            end
+        end
+    else
+        local count = full and #visible_metrics or math.min(2, #visible_metrics)
+        for i = 1, count do
+            local metric = visible_metrics[i]
+            if metric then group[#group + 1] = renderMetric(metric, width, scale_pct, show_scores) end
+            if i < count then group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) } end
         end
     end
     if full then
+        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(18) }
         group[#group + 1] = textWidget(
-            T(_("%1 min read · %2 author entries"), snapshot.total_minutes, snapshot.author_count),
-            width, scale_pct, true)
+            T(_("%1 min recorded · %2 author entries"), snapshot.total_minutes, snapshot.author_count),
+            width, scale_pct, "muted")
         group[#group + 1] = textWidget(
-            _("Completion data unavailable; no completion score shown."), width, scale_pct, true)
+            _("Completion is not measured; KOReader has no reliable finished-state data here."),
+            width, scale_pct, "muted")
     end
     return group
 end
