@@ -1,5 +1,7 @@
 # Local development files
 references/
+dist/
+__pycache__/
 development-plan.docx
 *.swp
 *.swo

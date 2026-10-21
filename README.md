@@ -2,7 +2,7 @@
 
 Offline reading profile for KOReader's Bookshelf micro-modules. It summarizes recent reading patterns as consistency, inferred session depth, book loyalty, exploration, night reading, and book switching.
 
-Current development version: `0.2.0`.
+Current development version: `0.2.1`.
 
 Reading DNA is a descriptive, playful summary, not a psychological assessment. Scores are hidden when evidence is too limited. Archetypes stay provisional until the selected window contains at least 14 active days and 5 hours of recorded reading.
 
@@ -23,6 +23,10 @@ Targeted against KOReader `v2026.07.1` and Bookshelf installed on a Kindle. Othe
 5. Tap the card to analyze or refresh. Long-press it for settings.
 
 On Kindle, the USB-visible path is usually `koreader/settings/bookshelf/micromodules/`. The module needs no registry entry or Bookshelf source patch. Remove the one Lua file to uninstall it.
+
+## Releases
+
+After Kindle compatibility checks pass, tagged GitHub releases publish a ZIP containing `reading_dna.lua`, this README, the changelog, and license. Copy `reading_dna.lua` from the archive into `koreader/settings/bookshelf/micromodules/`. Release tags must match the module version (for example, `v0.2.1`).
 
 ## Settings
 
@@ -68,6 +72,7 @@ docs/
 tests/
   test_reading_dna.lua          Lua regression checks
 .github/workflows/test.yml     Lua 5.1 test workflow
+scripts/package_release.py     Reproducible install ZIP builder
 CHANGELOG.md                    Release history
 LICENSE                         AGPL-3.0-only
 README.md                       User and installation guide

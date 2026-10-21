@@ -14,3 +14,8 @@ jobs:
           luaVersion: "5.1"
       - name: Run regression tests
         run: lua tests/test_reading_dna.lua
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Test release packaging
+        run: python -m unittest discover -s tests -p "test_*.py"

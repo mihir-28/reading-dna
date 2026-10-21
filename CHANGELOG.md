@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 — Release packaging
+
+- Add reproducible install ZIP packaging and tagged GitHub release workflow.
+- Keep release creation gated on manual Kindle compatibility checks.
+
 ## 0.2.0 — Reading trends
 
 - Compare active days and recorded minutes across adjacent equal-length windows.

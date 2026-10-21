@@ -35,6 +35,8 @@ The tap reads twice the selected period once. The calculation splits those rows 
 
 Run `lua tests/test_reading_dna.lua` with Lua 5.1. Synthetic checks cover empty and short histories, interval overlaps, free-form author metadata, local calendar boundaries, and query/schema errors. The production module exposes these helpers only when the global `READING_DNA_TEST` flag is set by the test runner.
 
+Build a local install archive with `python scripts/package_release.py`. The script checks that the module version has a changelog entry and writes `dist/reading-dna-v<version>.zip`. Only tag a release after manual Kindle checks; the release workflow rejects a tag that differs from the module version.
+
 ## Local references
 
 Device-source snapshots and the inspection summary are kept in the workspace's ignored `references/` folder. They are excluded from this repository so version snapshots and local development material do not ship with the module.
