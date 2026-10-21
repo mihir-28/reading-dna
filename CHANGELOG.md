@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 — Metric accuracy
+
+- Clip overlapping event time to prevent double-counting durations and session lengths.
+- Exclude pre-history days from the consistency denominator.
+- Count complete author metadata credits instead of splitting ambiguous names on commas.
+- Document measurement choices and limitations.
+
 ## 0.1.1 — Kindle UI polish
 
 - Shorten full-screen supporting text to reduce clipping on narrow screens.

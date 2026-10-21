@@ -7,7 +7,7 @@ local T = require("ffi/util").template
 local Kit = require("lib/bookshelf_module_kit")
 
 local MODULE_KEY = "reading_dna"
-local MODULE_VERSION = "0.1.1"
+local MODULE_VERSION = "0.1.2"
 local DEFAULT_WINDOW = 30
 local SESSION_GAP = 20 * 60
 local MIN_SESSION = 60
@@ -24,6 +24,12 @@ end
 
 local function localDateKey(timestamp)
     return os.date("%Y-%m-%d", timestamp)
+end
+
+local function localDayStart(timestamp)
+    local date = os.date("*t", timestamp)
+    date.hour, date.min, date.sec = 0, 0, 0
+    return os.time(date)
 end
 
 local function windowStart(now, days)
@@ -64,6 +70,56 @@ local function nightFraction(timestamp, duration, night_start, night_end)
     return late
 end
 
+-- Statistics can contain overlapping page intervals. Assign overlap to the
+-- earliest event so totals, daily shares, and session lengths never double-count.
+local function normalizeEvents(events)
+    local normalized, covered_until = {}, nil
+    for _, event in ipairs(events) do
+        local start_time = math.max(event.time, covered_until or event.time)
+        local finish = event.time + event.duration
+        if finish > start_time then
+            normalized[#normalized + 1] = {
+                book = event.book,
+                time = start_time,
+                duration = finish - start_time,
+                authors = event.authors,
+            }
+            covered_until = finish
+        end
+    end
+    return normalized
+end
+
+-- KOReader's authors field is free-form metadata. Commas are not a safe
+-- delimiter (some names use "Family, Given"), so count normalized credits as
+-- stored instead of guessing at individual contributors.
+local function countAuthorCredits(events)
+    local credits = {}
+    for _, event in ipairs(events) do
+        local credit = event.authors:gsub("%s+", " "):match("^%s*(.-)%s*$"):lower()
+        if credit ~= "" and credit ~= "n/a" then credits[credit] = true end
+    end
+    local count = 0
+    for _ in pairs(credits) do count = count + 1 end
+    return count
+end
+
+local function observedDayCount(now, selected_start, first_event, days)
+    local first_eligible = selected_start
+    if first_event and first_event > first_eligible then
+        first_eligible = localDayStart(first_event)
+    end
+    local cursor = first_eligible
+    local count = 0
+    while cursor <= now and count < days do
+        count = count + 1
+        local date = os.date("*t", cursor)
+        date.day = date.day + 1
+        cursor = os.time(date)
+    end
+    return math.max(1, count)
+end
+
 local function readEvents(days, night_start, night_end)
     local DataStorage = require("datastorage")
     local path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
@@ -82,13 +138,15 @@ local function readEvents(days, night_start, night_end)
 
         local rows = {}
         local statement = connection:prepare([[
-            SELECT p.id_book, p.start_time, p.duration, COALESCE(b.authors, '')
+            SELECT p.id_book, p.start_time, p.duration, COALESCE(b.authors, ''),
+                   (SELECT MIN(start_time) FROM page_stat_data WHERE duration > 0)
             FROM page_stat_data AS p
             LEFT JOIN book AS b ON b.id = p.id_book
             WHERE p.start_time >= ? AND p.start_time <= ? AND p.duration > 0
             ORDER BY p.start_time ASC
         ]])
         local step = statement:bind(first, now):step()
+        local first_event = tonumber(step and step[5])
         while step do
             local timestamp = tonumber(step[2])
             local duration = tonumber(step[3])
@@ -103,7 +161,7 @@ local function readEvents(days, night_start, night_end)
             step = statement:step()
         end
         statement:close()
-        return { events = rows, now = now, window_start = first }
+        return { events = rows, now = now, window_start = first, first_event = first_event }
     end)
     if connection then pcall(connection.close, connection) end
     if not ok then
@@ -152,20 +210,16 @@ end
 local function calculate(days, night_start, night_end)
     local result, err = readEvents(days, night_start, night_end)
     if not result then return nil, err end
-    local events = result.events
+    local raw_events = result.events
+    local events = normalizeEvents(raw_events)
     if #events == 0 then return { empty = true, days = days, analyzed_at = result.now } end
 
-    local day_totals, books, authors = {}, {}, {}
+    local day_totals, books = {}, {}
     local active_days, total_seconds, late_seconds = 0, 0, 0
     for _, event in ipairs(events) do
         local date = localDateKey(event.time)
         day_totals[date] = day_totals[date] or {}
         day_totals[date][event.book] = (day_totals[date][event.book] or 0) + event.duration
-        books[event.book] = true
-        for author in event.authors:gmatch("[^,;]+") do
-            author = author:match("^%s*(.-)%s*$")
-            if author ~= "" then authors[author:lower()] = true end
-        end
         total_seconds = total_seconds + event.duration
         late_seconds = late_seconds + nightFraction(event.time, event.duration, night_start, night_end)
     end
@@ -182,13 +236,13 @@ local function calculate(days, night_start, night_end)
     end
 
     local sessions, session_lengths, switches = sessionize(events)
-    local observed_days = math.min(days, math.max(1,
-        math.floor((result.now - result.window_start) / 86400) + 1))
+    local observed_days = observedDayCount(result.now, result.window_start, result.first_event, days)
     local consistency = 100 * active_days / observed_days
     local median_session = median(session_lengths)
-    local book_count, author_count = 0, 0
+    local book_count = 0
+    for _, event in ipairs(raw_events) do books[event.book] = true end
     for _ in pairs(books) do book_count = book_count + 1 end
-    for _ in pairs(authors) do author_count = author_count + 1 end
+    local author_count = countAuthorCredits(raw_events)
 
     local metrics = {
         { key = "consistency", label = _("Consistency"), raw = T(_("%1 / %2 days"), active_days, observed_days),
@@ -201,7 +255,7 @@ local function calculate(days, night_start, night_end)
         { key = "loyalty", label = _("Book loyalty"), raw = T(_("%1 / %2 focused days"), loyal_days, active_days),
             score = active_days > 0 and 100 * loyal_days / active_days or nil, sample = active_days,
             available = active_days >= 5, confidence_hint = _("Need 5 active days") },
-        { key = "exploration", label = _("Exploration"), raw = T(_("%1 books · %2 authors"), book_count, author_count),
+        { key = "exploration", label = _("Exploration"), raw = T(_("%1 books · %2 author credits"), book_count, author_count),
             score = clamp(50 * math.min(1, book_count / 10) + 50 * math.min(1, author_count / 5), 0, 100),
             sample = book_count, available = book_count >= 3, confidence_hint = _("Need 3 books") },
         { key = "night", label = _("Night reading"), raw = total_seconds > 0 and T(_("%1% of read time"), math.floor(100 * late_seconds / total_seconds + 0.5)) or nil,
@@ -400,7 +454,7 @@ local function render(ctx)
     if full then
         group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(18) }
         group[#group + 1] = textWidget(
-            T(_("%1 min · %2 authors"), snapshot.total_minutes, snapshot.author_count),
+            T(_("%1 min · %2 credits"), snapshot.total_minutes, snapshot.author_count),
             width, scale_pct, "muted")
         group[#group + 1] = textWidget(
             _("Finished books are not tracked reliably."),

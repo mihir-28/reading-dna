@@ -2,7 +2,7 @@
 
 Offline reading profile for KOReader's Bookshelf micro-modules. It summarizes recent reading patterns as consistency, inferred session depth, book loyalty, exploration, night reading, and book switching.
 
-Current development version: `0.1.1`.
+Current development version: `0.1.2`.
 
 Reading DNA is a descriptive, playful summary, not a psychological assessment. Scores are hidden when evidence is too limited. Archetypes stay provisional until the selected window contains at least 14 active days and 5 hours of recorded reading.
 
@@ -37,14 +37,14 @@ Changing a setting clears the cached summary. Tap the card to recalculate.
 
 ## Metrics
 
-- **Consistency:** local calendar days with reading events divided by selected window days. Score shown after at least 3 active days and 30 minutes recorded.
+- **Consistency:** local calendar days with reading events divided by eligible days in the selected window. If statistics begin after the window starts, days before the first recorded event are excluded. Score shown after at least 3 active days and 30 minutes recorded.
 - **Session depth:** median duration of inferred sessions, grouped across gaps of at most 20 minutes. Score reaches 100 at a 60-minute median; requires at least 3 sessions.
 - **Book loyalty:** share of active days where one book accounts for at least 60% of recorded reading time; requires 5 active days.
-- **Exploration:** half the score comes from distinct books (10 reaches that half's maximum); half from distinct author entries (5 reaches that half's maximum); requires 3 books.
+- **Exploration:** half the score comes from distinct books (10 reaches that half's maximum); half from distinct author metadata credits (5 reaches that half's maximum); requires 3 books. KOReader stores authors as free-form text, so each complete metadata string counts as one credit rather than guessing at comma-separated names.
 - **Night reading:** share of recorded reading seconds inside the selected night interval; requires at least 60 minutes.
 - **Book switching:** share of adjacent inferred sessions involving a different book; requires at least 4 sessions.
 
-Scores are simple descriptive scales, not validated measures. Archetype rules use thresholds: Deep Diver (depth and loyalty ≥65), Explorer (exploration ≥65), Marathoner (depth ≥60 and consistency ≥65), Night Owl (night reading ≥60), and Wanderer (switching ≥70). The evidence gate applies before assigning an archetype. Otherwise, the card shows Mixed Reader provisionally.
+Overlapping event intervals are clipped to the earliest event, preventing duplicated reading time. Scores are simple descriptive scales, not validated measures. Archetype rules use thresholds: Deep Diver (depth and loyalty ≥65), Explorer (exploration ≥65), Marathoner (depth ≥60 and consistency ≥65), Night Owl (night reading ≥60), and Wanderer (switching ≥70). The evidence gate applies before assigning an archetype. Otherwise, the card shows Mixed Reader provisionally.
 
 Completion is not scored: the statistics database does not provide reliable finished-state evidence. Genre exploration is omitted when metadata may be incomplete.
 
