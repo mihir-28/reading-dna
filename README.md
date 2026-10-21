@@ -1,10 +1,10 @@
 # Reading DNA
 
-Offline reading profile for KOReader's Bookshelf micro-modules. It summarizes recent reading patterns as consistency, inferred session depth, book loyalty, exploration, night reading, and book switching.
+Offline reading profile for KOReader's Bookshelf micro-modules. It summarizes reading regularity, inferred session length, focused days, reading breadth, night-time share, book changes, streaks, and weekend reading.
 
-Current development version: `0.3.2`.
+Current development version: `0.4.0`.
 
-Reading DNA is a descriptive, playful summary, not a psychological assessment. Scores are hidden when evidence is too limited. Archetypes stay provisional until the selected window contains at least 14 active days and 5 hours of recorded reading.
+Reading DNA is a descriptive reading summary, not a psychological assessment. Measures stay in their original units; small samples are marked provisional. Reader-pattern traits need at least 14 active days and 5 hours of recorded reading overall.
 
 ## Requirements
 
@@ -35,23 +35,26 @@ Long-press the card, then choose **Module settings**:
 - Analysis window: 30, 90, or 365 days.
 - Full-screen layout: Field Notes, Shelf Index, or Fingerprint.
 - Night interval: 20:00–06:00, 21:00–04:00, or 22:00–05:00, using device-local time.
-- Show or hide scores.
-- Show or hide archetype.
+- Show or hide reader-pattern traits.
 
-Changing the analysis window or night interval starts analysis automatically. Layout, score, and archetype choices apply without rerunning analysis. Tap the card any time to refresh statistics.
+Changing the analysis window or night interval starts analysis automatically. Layout and trait-display choices apply without rerunning analysis. Tap the card any time to refresh statistics.
 
 ## Metrics
 
-- **Consistency:** local calendar days with reading events divided by eligible days in the selected window. If statistics begin after the window starts, days before the first recorded event are excluded. Score shown after at least 3 active days and 30 minutes recorded.
-- **Session depth:** median duration of inferred sessions, grouped across gaps of at most 20 minutes. Score reaches 100 at a 60-minute median; requires at least 3 sessions.
-- **Book loyalty:** share of active days where one book accounts for at least 60% of recorded reading time; requires 5 active days.
-- **Exploration:** half the score comes from distinct books (10 reaches that half's maximum); half from distinct author metadata credits (5 reaches that half's maximum); requires 3 books. KOReader stores authors as free-form text, so each complete metadata string counts as one credit rather than guessing at comma-separated names.
-- **Night reading:** share of recorded reading seconds inside the selected night interval; requires at least 60 minutes.
-- **Book switching:** share of adjacent inferred sessions involving a different book; requires at least 4 sessions.
+- **Reading regularity:** reading days divided by the recorded-history span inside the selected window. The span starts at the earliest positive-duration event in KOReader's statistics database. Days with no reading count as non-reading days. This is not proof that KOReader recorded data on every day in that span.
+- **Session length:** median duration of inferred sessions. Events belong to one session when the gap between them is at most 20 minutes. Sessions under one minute are excluded and sessions are capped at 6 hours; at least 3 sessions are needed for a stable pattern label.
+- **Focused days:** count and share of reading days where one book accounts for at least 60% of that day's recorded reading time. Requires 5 reading days for a stable pattern label.
+- **Reading breadth:** distinct book IDs plus distinct author metadata strings. Author strings are not verified people; a combined multi-author field counts as one entry. The two counts remain separate; no blended score is calculated.
+- **Night-time share:** share of recorded reading seconds inside the selected night interval, using device-local time. The interval is configurable; this is a schedule description, not a quality rating. Requires at least 60 minutes recorded.
+- **Book changes:** count and percentage of adjacent valid-session transitions where the book changed. The denominator is `valid sessions − 1`; at least 4 valid sessions are needed for a stable pattern label.
+- **Longest reading streak:** longest run of consecutive local calendar days with reading events.
+- **Weekend reading:** share of recorded time on Saturday and Sunday, plus number of weekend days with reading.
 
-The full-screen layouts share the same calculated metrics and cached snapshot. Field Notes emphasizes daily and reading totals, Shelf Index presents measurements as a ledger, and Fingerprint visualizes the book count and score bars. The full-screen view compares active days and recorded minutes with the immediately preceding window of equal length. Trends appear only when both windows have at least 3 active days and 30 minutes recorded.
+No 0–100 scores are shown: those earlier scales mixed unlike quantities and implied a quality ranking. Measures with small samples remain visible with a provisional note. The overall profile requires at least 14 active days and 5 hours recorded. Qualified pattern traits appear together rather than competing for one archetype. Traits include Steady Reader (at least 35% of recorded-history days), Long-session Reader (30-minute median across at least 3 sessions), Short-session Reader (15-minute median or less across at least 5 sessions), Focused Reader (at least 60% focused days), Wide-ranging Reader (8 or more distinct books), Night Reader (at least 40% in selected night hours and 3 hours recorded), Book-switching Reader (at least 40% of transitions across 4 sessions), Streak Builder (5 consecutive reading days), and Weekend Reader (at least 50% of reading time on weekends, across 4 or more weekend reading days). These are descriptive labels, not goals or judgments.
 
-Overlapping event intervals are clipped to the earliest event, preventing duplicated reading time. Scores are simple descriptive scales, not validated measures. Archetype rules use thresholds: Deep Diver (depth and loyalty ≥65), Explorer (exploration ≥65), Marathoner (depth ≥60 and consistency ≥65), Night Owl (night reading ≥60), and Wanderer (switching ≥70). The evidence gate applies before assigning an archetype. Otherwise, the card shows Mixed Reader provisionally.
+The full-screen layouts share the same calculated metrics and cached snapshot. Field Notes emphasizes profile context, Shelf Index presents measurements as a ledger, and Fingerprint shows them as evidence cards. Where both equal-length windows have at least 3 active days and 30 minutes recorded, the view compares active days and minutes with the immediately preceding window.
+
+Overlapping event intervals are clipped to the earliest event, preventing duplicated reading time. “History days” are a calendar span inferred from the earliest event, not a completeness guarantee. Session and book counts depend on KOReader's event data and metadata quality.
 
 Completion is not scored: the statistics database does not provide reliable finished-state evidence. Genre exploration is omitted when metadata may be incomplete.
 

@@ -7,7 +7,8 @@ local T = require("ffi/util").template
 local Kit = require("lib/bookshelf_module_kit")
 
 local MODULE_KEY = "reading_dna"
-local MODULE_VERSION = "0.3.2"
+local MODULE_VERSION = "0.4.0"
+local PROFILE_SCHEMA_VERSION = "0.4"
 local DEFAULT_WINDOW = 30
 local SESSION_GAP = 20 * 60
 local MIN_SESSION = 60
@@ -47,6 +48,25 @@ local function median(values)
     local middle = math.floor((#values + 1) / 2)
     if #values % 2 == 1 then return values[middle] end
     return (values[middle] + values[middle + 1]) / 2
+end
+
+local function longestActiveStreak(dates)
+    if #dates == 0 then return 0 end
+    table.sort(dates)
+    local longest, current = 1, 1
+    for index = 2, #dates do
+        local year, month, day = dates[index - 1]:match("(%d+)-(%d+)-(%d+)")
+        local parts = { year = tonumber(year), month = tonumber(month), day = tonumber(day) }
+        parts.hour, parts.min, parts.sec = 12, 0, 0
+        parts.day = parts.day + 1
+        if localDateKey(os.time(parts)) == dates[index] then
+            current = current + 1
+        else
+            longest = math.max(longest, current)
+            current = 1
+        end
+    end
+    return math.max(longest, current)
 end
 
 local function nightFraction(timestamp, duration, night_start, night_end)
@@ -285,19 +305,26 @@ end
 local function calculateSingle(days, night_start, night_end, result)
     local raw_events = result.events
     local events = normalizeEvents(raw_events)
-    if #events == 0 then return { empty = true, days = days, analyzed_at = result.now } end
+    if #events == 0 then
+        return { empty = true, days = days, analyzed_at = result.now, profile_schema = PROFILE_SCHEMA_VERSION }
+    end
 
-    local day_totals, books = {}, {}
-    local active_days, total_seconds, late_seconds = 0, 0, 0
+    local day_totals, books, weekend_dates = {}, {}, {}
+    local active_days, total_seconds, late_seconds, weekend_seconds = 0, 0, 0, 0
     for _, event in ipairs(events) do
         local date = localDateKey(event.time)
         day_totals[date] = day_totals[date] or {}
         day_totals[date][event.book] = (day_totals[date][event.book] or 0) + event.duration
         total_seconds = total_seconds + event.duration
         late_seconds = late_seconds + nightFraction(event.time, event.duration, night_start, night_end)
+        local weekday = os.date("*t", event.time).wday
+        if weekday == 1 or weekday == 7 then
+            weekend_seconds = weekend_seconds + event.duration
+            weekend_dates[date] = true
+        end
     end
 
-    local loyal_days = 0
+    local focused_days = 0
     for _, by_book in pairs(day_totals) do
         active_days = active_days + 1
         local day_total, day_max = 0, 0
@@ -305,57 +332,90 @@ local function calculateSingle(days, night_start, night_end, result)
             day_total = day_total + seconds
             day_max = math.max(day_max, seconds)
         end
-        if day_total > 0 and day_max / day_total >= 0.6 then loyal_days = loyal_days + 1 end
+        if day_total > 0 and day_max / day_total >= 0.6 then focused_days = focused_days + 1 end
     end
 
     local sessions, session_lengths, switches = sessionize(events)
     local observed_days = observedDayCount(result.now, result.window_start, result.first_event, days)
-    local consistency = 100 * active_days / observed_days
+    local regularity_pct = math.floor(100 * active_days / observed_days + 0.5)
     local median_session = median(session_lengths)
+    local active_dates = {}
+    for date in pairs(day_totals) do active_dates[#active_dates + 1] = date end
+    local longest_streak = longestActiveStreak(active_dates)
     local book_count = 0
     for _, event in ipairs(raw_events) do books[event.book] = true end
     for _ in pairs(books) do book_count = book_count + 1 end
     local author_count = countAuthorCredits(raw_events)
-
+    local weekend_active_days = 0
+    for _ in pairs(weekend_dates) do weekend_active_days = weekend_active_days + 1 end
+    local night_pct = total_seconds > 0 and math.floor(100 * late_seconds / total_seconds + 0.5) or 0
+    local weekend_pct = total_seconds > 0 and math.floor(100 * weekend_seconds / total_seconds + 0.5) or 0
+    local switch_denominator = math.max(0, #sessions - 1)
+    local switch_pct = switch_denominator > 0
+        and math.floor(100 * switches / switch_denominator + 0.5) or 0
+    local focus_pct = active_days > 0 and math.floor(100 * focused_days / active_days + 0.5) or 0
+    local switch_raw = switch_denominator > 0
+        and T(_("%1 of %2 session transitions · %3%"), switches, switch_denominator, switch_pct)
+        or _("No session transitions yet")
+    local night_window = T(_("%1:00–%2:00"), string.format("%02d", night_start), string.format("%02d", night_end))
     local metrics = {
-        { key = "consistency", label = _("Consistency"), raw = T(_("%1 / %2 days"), active_days, observed_days),
-            score = active_days >= 3 and clamp(consistency, 0, 100) or nil,
-            sample = active_days, available = active_days >= 3 and total_seconds >= 30 * 60,
+        { key = "consistency", label = _("Reading regularity"),
+            raw = T(_("%1 of %2 history days · %3%"), active_days, observed_days, regularity_pct),
+            detail = _("History span starts at first recorded event; gaps count as non-reading days."),
+            sample = observed_days, available = active_days >= 3 and total_seconds >= 30 * 60,
             confidence_hint = active_days < 3 and _("Need 3 active days") or _("Need 30 minutes recorded") },
-        { key = "depth", label = _("Session depth"), raw = median_session and T(_("%1 min median session"), math.floor(median_session / 60 + 0.5)) or nil,
-            score = median_session and clamp(median_session / (60 * 60) * 100, 0, 100) or nil,
+        { key = "depth", label = _("Session length"),
+            raw = median_session and T(_("%1 min median"), math.floor(median_session / 60 + 0.5)) or _("Not enough sessions"),
+            detail = T(_("%1 valid sessions · split after 20 min idle"), #sessions),
             sample = #sessions, available = #sessions >= 3, confidence_hint = _("Need 3 valid sessions") },
-        { key = "loyalty", label = _("Book loyalty"), raw = T(_("%1 / %2 focused days"), loyal_days, active_days),
-            score = active_days > 0 and 100 * loyal_days / active_days or nil, sample = active_days,
-            available = active_days >= 5, confidence_hint = _("Need 5 active days") },
-        { key = "exploration", label = _("Exploration"), raw = T(_("%1 books · %2 author credits"), book_count, author_count),
-            score = clamp(50 * math.min(1, book_count / 10) + 50 * math.min(1, author_count / 5), 0, 100),
-            sample = book_count, available = book_count >= 3, confidence_hint = _("Need 3 books") },
-        { key = "night", label = _("Night reading"), raw = total_seconds > 0 and T(_("%1% of read time"), math.floor(100 * late_seconds / total_seconds + 0.5)) or nil,
-            score = total_seconds > 0 and 100 * late_seconds / total_seconds or nil,
+        { key = "loyalty", label = _("Focused days"),
+            raw = T(_("%1 of %2 reading days · %3%"), focused_days, active_days, focus_pct),
+            detail = _("One book held at least 60% of that day’s recorded time."), sample = active_days,
+            available = active_days >= 5, confidence_hint = _("Need 5 reading days") },
+        { key = "exploration", label = _("Reading breadth"),
+            raw = T(_("%1 titles · %2 author metadata entries"), book_count, author_count),
+            detail = _("Author entries are distinct stored metadata strings, not verified people."),
+            sample = book_count, available = book_count >= 3, confidence_hint = _("Need 3 titles") },
+        { key = "night", label = _("Night-time share"),
+            raw = T(_("%1% of reading time · %2"), night_pct, night_window),
+            detail = _("Share inside selected device-local hours; not a quality score."),
             sample = math.floor(total_seconds / 60), available = total_seconds >= 60 * 60,
             confidence_hint = _("Need 60 minutes recorded") },
-        { key = "switching", label = _("Switches"), raw = T(_("%1 / %2 sessions"), switches, #sessions),
-            score = #sessions > 1 and 100 * switches / (#sessions - 1) or nil,
-            sample = #sessions, available = #sessions >= 4, confidence_hint = _("Need 4 valid sessions") },
+        { key = "switching", label = _("Book changes"),
+            raw = switch_raw,
+            detail = _("Different books across adjacent valid sessions."), sample = #sessions,
+            available = #sessions >= 4, confidence_hint = _("Need 4 valid sessions") },
+        { key = "streak", label = _("Longest reading streak"),
+            raw = T(_("%1 consecutive days"), longest_streak),
+            detail = _("Consecutive local calendar days with recorded reading."), sample = active_days,
+            available = active_days >= 3, confidence_hint = _("Need 3 reading days") },
+        { key = "weekend", label = _("Weekend reading"),
+            raw = T(_("%1% of time · %2 weekend days"), weekend_pct, weekend_active_days),
+            detail = _("Share of recorded time on Saturday and Sunday, using device-local dates."),
+            sample = weekend_active_days, available = weekend_active_days >= 4,
+            confidence_hint = _("Need 4 weekend reading days") },
     }
 
-    for _, metric in ipairs(metrics) do
-        if not metric.available then metric.score = nil end
-        if metric.score then metric.score = clamp(math.floor(metric.score + 0.5), 0, 100) end
-    end
-
     local evidence = active_days >= MIN_ACTIVE_DAYS and total_seconds >= MIN_TOTAL_SECONDS
-    local values = {}
-    for _, metric in ipairs(metrics) do values[metric.key] = metric.score end
-    local archetype = "Mixed Reader"
-    if evidence then
-        if values.night and values.night >= 60 then archetype = "Night Owl"
-        elseif values.depth and values.loyalty and values.depth >= 65 and values.loyalty >= 65 then archetype = "Deep Diver"
-        elseif values.exploration and values.exploration >= 65 then archetype = "Explorer"
-        elseif values.depth and values.consistency and values.depth >= 60 and values.consistency >= 65 then archetype = "Marathoner"
-        elseif values.switching and values.switching >= 70 then archetype = "Wanderer" end
+    local archetypes = {}
+    local function addArchetype(name)
+        archetypes[#archetypes + 1] = name
     end
+    if evidence then
+        if regularity_pct >= 35 then addArchetype(_("Steady Reader")) end
+        if median_session and median_session >= 30 * 60 and #sessions >= 3 then
+            addArchetype(_("Long-session Reader"))
+        elseif median_session and median_session <= 15 * 60 and #sessions >= 5 then
+            addArchetype(_("Short-session Reader"))
+        end
+        if active_days >= 5 and focus_pct >= 60 then addArchetype(_("Focused Reader")) end
+        if book_count >= 8 then addArchetype(_("Wide-ranging Reader")) end
+        if total_seconds >= 3 * 60 * 60 and night_pct >= 40 then addArchetype(_("Night Reader")) end
+        if #sessions >= 4 and switch_pct >= 40 then addArchetype(_("Book-switching Reader")) end
+        if longest_streak >= 5 then addArchetype(_("Streak Builder")) end
+        if weekend_active_days >= 4 and weekend_pct >= 50 then addArchetype(_("Weekend Reader")) end
+    end
+    if #archetypes == 0 then archetypes[1] = evidence and _("Mixed Reader") or _("Building a pattern") end
 
     return {
         empty = false,
@@ -370,8 +430,11 @@ local function calculateSingle(days, night_start, night_end, result)
         book_count = book_count,
         author_count = author_count,
         evidence = evidence,
-        archetype = archetype,
+        archetype = archetypes[1],
+        archetypes = archetypes,
+        profile_schema = PROFILE_SCHEMA_VERSION,
         metrics = metrics,
+        longest_streak = longest_streak,
     }
 end
 
@@ -432,7 +495,7 @@ local function startAnalysis(ctx, replace_pending)
     }
     local selected_night = night_hours[night_window] or night_hours["21-04"]
     local night_start, night_end = selected_night[1], selected_night[2]
-    store:set("snapshot", { pending = true, days = days })
+    store:set("snapshot", { pending = true, days = days, profile_schema = PROFILE_SCHEMA_VERSION })
     if _refresh then _refresh() end
     readEventsAsync(days * 2, function(result, err)
         -- A newer settings choice supersedes this result; never display a stale window.
@@ -450,7 +513,10 @@ end
 
 local function getSnapshot(days)
     local snapshot = store:get("snapshot")
-    if type(snapshot) == "table" and snapshot.days == days then return snapshot end
+    if type(snapshot) == "table" and snapshot.days == days
+            and (snapshot.pending or snapshot.error or snapshot.profile_schema == PROFILE_SCHEMA_VERSION) then
+        return snapshot
+    end
     return nil
 end
 
@@ -470,24 +536,17 @@ local function textWidget(text, width, scale_pct, role)
     }
 end
 
-local function renderMetric(metric, width, scale_pct, show_scores)
-    local score = metric.score
+local function renderMetric(metric, width, scale_pct)
     local VerticalGroup = require("ui/widget/verticalgroup")
     local VerticalSpan = require("ui/widget/verticalspan")
     local group = VerticalGroup:new{ align = "left" }
     group[#group + 1] = textWidget(metric.label, width, scale_pct, "label")
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(2) }
     group[#group + 1] = textWidget(metric.raw or _("No reading data"), width, scale_pct, "value")
-    if show_scores and score then
-        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
-        group[#group + 1] = Kit.progressBar{
-            width = math.max(50, width), height = Kit.sc(scale_pct)(5), fraction = score / 100,
-        }
-        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
-        group[#group + 1] = textWidget(T(_("Score %1 / 100"), score), width, scale_pct, "muted")
-    elseif not score then
-        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
-        group[#group + 1] = textWidget(metric.confidence_hint or _("More reading data needed"), width, scale_pct, "muted")
+    if metric.detail then group[#group + 1] = textWidget(metric.detail, width, scale_pct, "muted") end
+    if not metric.available and metric.confidence_hint then
+        group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(2) }
+        group[#group + 1] = textWidget(T(_("Provisional · %1"), metric.confidence_hint), width, scale_pct, "muted")
     end
     return group
 end
@@ -550,6 +609,18 @@ local function getCoverageText(snapshot)
     return T(_("%1 observed days"), getObservedDays(snapshot))
 end
 
+local function getTraitSummary(snapshot)
+    if not snapshot.evidence then
+        return T(_("Building a pattern · needs %1 active days and 5 hours."), MIN_ACTIVE_DAYS)
+    end
+    local traits = snapshot.archetypes or {}
+    if #traits == 1 and traits[1] == _("Mixed Reader") then
+        return _("No single reading pattern stands out yet.")
+    end
+    if #traits > 0 then return T(_("Patterns: %1"), table.concat(traits, " · ")) end
+    return _("No reading patterns available yet.")
+end
+
 local function renderLeadStat(value, label, width, scale_pct)
     local VerticalGroup = require("ui/widget/verticalgroup")
     local VerticalSpan = require("ui/widget/verticalspan")
@@ -568,7 +639,11 @@ local function renderReadingNote(metric, label, note, width, scale_pct, value_ov
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(2) }
     group[#group + 1] = textWidget(value_override or (metric and metric.raw or _("No reading data")), width, scale_pct, "metric_value")
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(2) }
-    group[#group + 1] = textWidget(note, width, scale_pct, "muted")
+    group[#group + 1] = textWidget((metric and metric.detail) or note, width, scale_pct, "muted")
+    if metric and not metric.available and metric.confidence_hint then
+        group[#group + 1] = textWidget(T(_("Provisional · %1"), metric.confidence_hint),
+            width, scale_pct, "muted")
+    end
     return group
 end
 
@@ -590,47 +665,17 @@ local function frameWidget(child, scale_pct, target_width)
     return FrameWidget:new{}
 end
 
-local function renderScoreDots(score, width, scale_pct)
-    local Widget = require("ui/widget/widget")
-    local Geom = require("ui/geometry")
-    local sc = Kit.sc(scale_pct)
-    local count, gap, height = 10, sc(3), sc(7)
-    local dot_width = math.max(2, math.floor((width - gap * (count - 1)) / count))
-    local total_width = count * dot_width + (count - 1) * gap
-    local filled = score and math.floor(score / 10 + 0.5) or 0
-    local DotWidget = Widget:extend{}
-    function DotWidget:getSize() return Geom:new{ w = total_width, h = height } end
-    function DotWidget:paintTo(bb, x, y)
-        for i = 1, count do
-            local dx = x + (i - 1) * (dot_width + gap)
-            if i <= filled then
-                bb:paintRect(dx, y, dot_width, height, Kit.COLOR_PRIMARY)
-            else
-                bb:paintRect(dx, y, dot_width, 1, Kit.COLOR_MUTED)
-                bb:paintRect(dx, y + height - 1, dot_width, 1, Kit.COLOR_MUTED)
-                bb:paintRect(dx, y, 1, height, Kit.COLOR_MUTED)
-                bb:paintRect(dx + dot_width - 1, y, 1, height, Kit.COLOR_MUTED)
-                if dot_width > 2 and height > 2 then
-                    bb:paintRect(dx + 1, y + 1, dot_width - 2, height - 2, Kit.CARD_BG)
-                end
-            end
-        end
-    end
-    return DotWidget:new{}
-end
-
-local function renderScoreTile(metric, title, note, width, scale_pct)
+local function renderMeasureTile(metric, title, width, scale_pct, target_width)
     local VerticalGroup = require("ui/widget/verticalgroup")
-    local VerticalSpan = require("ui/widget/verticalspan")
     local content = VerticalGroup:new{ align = "left" }
     content[#content + 1] = textWidget(title or metric.label, width, scale_pct, "label")
     content[#content + 1] = textWidget(metric.raw or _("No reading data"), width, scale_pct, "metric_value")
-    content[#content + 1] = textWidget(note or "", width, scale_pct, "muted")
-    content[#content + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(3) }
-    content[#content + 1] = renderScoreDots(metric.score, width, scale_pct)
-    content[#content + 1] = textWidget(metric.score and T(_("Score %1"), metric.score) or _("Score unavailable"),
-        width, scale_pct, "muted")
-    return frameWidget(content, scale_pct, width + Kit.sc(scale_pct)(12))
+    content[#content + 1] = textWidget(metric.detail or "", width, scale_pct, "muted")
+    if not metric.available and metric.confidence_hint then
+        content[#content + 1] = textWidget(T(_("Provisional · %1"), metric.confidence_hint),
+            width, scale_pct, "muted")
+    end
+    return frameWidget(content, scale_pct, target_width or (width + Kit.sc(scale_pct)(12)))
 end
 
 local function renderBarcode(width, scale_pct)
@@ -661,46 +706,18 @@ local function addTrend(group, snapshot, width, scale_pct, days)
     end
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(10) }
     group[#group + 1] = textWidget(
-        T(_("Vs prior %1d: %2 days · %3 min"), days,
+        T(_("Vs previous %1-day window: %2 reading days · %3 min"), days,
             signed(snapshot.trend.days), signed(snapshot.trend.minutes)),
         width, scale_pct, "muted")
 end
 
-local function renderMetricGrid(group, metrics, width, scale_pct, show_scores)
-    local HorizontalGroup = require("ui/widget/horizontalgroup")
-    local HorizontalSpan = require("ui/widget/horizontalspan")
-    local VerticalSpan = require("ui/widget/verticalspan")
-    local gap = Kit.sc(scale_pct)(18)
-    local col_width = math.max(1, math.floor((width - gap) / 2))
-    for index = 1, #metrics, 2 do
-        group[#group + 1] = HorizontalGroup:new{ align = "top",
-            renderMetric(metrics[index], col_width, scale_pct, show_scores),
-            HorizontalSpan:new{ width = gap },
-            metrics[index + 1]
-                and renderMetric(metrics[index + 1], col_width, scale_pct, show_scores)
-                or HorizontalSpan:new{ width = col_width },
-        }
-        if index + 1 < #metrics then
-            group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(16) }
-        end
-    end
-end
-
-local function renderFieldNotes(snapshot, label, width, scale_pct, days, show_scores)
+local function renderFieldNotes(snapshot, label, width, scale_pct, days, show_traits)
     local VerticalGroup = require("ui/widget/verticalgroup")
     local VerticalSpan = require("ui/widget/verticalspan")
     local HorizontalGroup = require("ui/widget/horizontalgroup")
     local HorizontalSpan = require("ui/widget/horizontalspan")
     local group = VerticalGroup:new{ align = "left" }
     local observed_days = getObservedDays(snapshot)
-    local descriptions = {
-        Explorer = _("You explore books and authors across reading sessions."),
-        ["Deep Diver"] = _("Longer sessions and focused days shape your reading."),
-        Marathoner = _("Steady reading days and longer sessions shape your profile."),
-        ["Night Owl"] = _("A notable share of your reading happens at night."),
-        Wanderer = _("You switch between books across reading sessions."),
-        ["Mixed Reader"] = _("A descriptive sketch of your recent reading habits."),
-    }
     local masthead = HorizontalGroup:new{ align = "center",
         textWidget(T(_("READING DNA  /  %1"), os.date("%Y", snapshot.analyzed_at)), width * 0.78, scale_pct, "label"),
         frameWidget(textWidget("R", Kit.sc(scale_pct)(32), scale_pct, "title"), scale_pct),
@@ -709,10 +726,12 @@ local function renderFieldNotes(snapshot, label, width, scale_pct, days, show_sc
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
     group[#group + 1] = textWidget(label, width, scale_pct, "display")
     group[#group + 1] = textWidget(
-        descriptions[label] or descriptions["Mixed Reader"], width, scale_pct, "muted")
+        _("A descriptive profile based on recorded reading activity."), width, scale_pct, "muted")
+    local trait_summary = show_traits and getTraitSummary(snapshot) or nil
+    if trait_summary then group[#group + 1] = textWidget(trait_summary, width, scale_pct, "muted") end
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(10) }
     group[#group + 1] = textWidget(T(_("Selected window: %1 days"), days), width, scale_pct, "label")
-    group[#group + 1] = textWidget(T(_("Statistics available: %1"), getCoverageText(snapshot)),
+    group[#group + 1] = textWidget(T(_("Recorded-history span: %1"), getCoverageText(snapshot)),
         width, scale_pct, "normal")
     addDivider(group, width)
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
@@ -737,27 +756,33 @@ local function renderFieldNotes(snapshot, label, width, scale_pct, days, show_sc
     local loyalty = metricByKey(snapshot, "loyalty")
     local night = metricByKey(snapshot, "night")
     local switching = metricByKey(snapshot, "switching")
+    local streak = metricByKey(snapshot, "streak")
+    local weekend = metricByKey(snapshot, "weekend")
     local notes = {
-        { depth, _("Session depth"), depth and T(_("median · %1 sessions"), depth.sample) or _("median session") },
-        { loyalty, _("Focused days"), _("one book held most reading time") },
-        { { raw = tostring(snapshot.author_count) }, _("Author credits"), _("distinct author entries") },
-        { night, _("Night reading"), _("of recorded time") },
-        { switching, _("Book changes"), _("between sessions") },
+        { metricByKey(snapshot, "consistency"), _("Reading regularity") },
+        { depth, _("Session length") },
+        { loyalty, _("Focused days") },
+        { metricByKey(snapshot, "exploration"), _("Reading breadth") },
+        { night, _("Night-time share") },
+        { switching, _("Book changes") },
+        { streak, _("Longest reading streak") },
+        { weekend, _("Weekend reading") },
     }
     for index = 1, #notes, 2 do
         local left, right = notes[index], notes[index + 1]
         group[#group + 1] = HorizontalGroup:new{ align = "top",
-            renderReadingNote(left[1], left[2], left[3], note_width, scale_pct, left[4]),
+            renderReadingNote(left[1], left[2], left[3], note_width, scale_pct),
             HorizontalSpan:new{ width = note_gap },
-            right and renderReadingNote(right[1], right[2], right[3], note_width, scale_pct, right[4])
+            right and renderReadingNote(right[1], right[2], right[3], note_width, scale_pct)
                 or HorizontalSpan:new{ width = note_width },
         }
         if index + 1 < #notes then group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) } end
     end
+    addTrend(group, snapshot, width, scale_pct, days)
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
     local coverage_note = VerticalGroup:new{ align = "left",
         textWidget(
-        T(_("Coverage note. Statistics are available for %1 of the selected %2 days."), observed_days, days),
+        T(_("History span: %1 days within the selected %2-day window."), observed_days, days),
         width - Kit.sc(scale_pct)(12), scale_pct, "muted"),
         textWidget(_("Finished books are not tracked reliably."), width - Kit.sc(scale_pct)(12), scale_pct, "muted"),
     }
@@ -765,7 +790,7 @@ local function renderFieldNotes(snapshot, label, width, scale_pct, days, show_sc
     return group
 end
 
-local function renderShelfIndex(snapshot, label, width, scale_pct, days, show_scores)
+local function renderShelfIndex(snapshot, label, width, scale_pct, days, show_traits)
     local VerticalGroup = require("ui/widget/verticalgroup")
     local VerticalSpan = require("ui/widget/verticalspan")
     local HorizontalGroup = require("ui/widget/horizontalgroup")
@@ -783,9 +808,11 @@ local function renderShelfIndex(snapshot, label, width, scale_pct, days, show_sc
     group[#group + 1] = textWidget(
         _("Profile classification · descriptive, not diagnostic"),
         width, scale_pct, "muted")
+    local trait_summary = show_traits and getTraitSummary(snapshot) or nil
+    if trait_summary then group[#group + 1] = textWidget(trait_summary, width, scale_pct, "muted") end
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
     local coverage = VerticalGroup:new{ align = "left",
-        textWidget(_("DATA COVERAGE"), width - Kit.sc(scale_pct)(120), scale_pct, "label"),
+        textWidget(_("RECORDED-HISTORY SPAN"), width - Kit.sc(scale_pct)(120), scale_pct, "label"),
         textWidget(T(_("%1 within %2 selected days"), getCoverageText(snapshot), days),
             width - Kit.sc(scale_pct)(120), scale_pct, "normal"),
     }
@@ -815,23 +842,36 @@ local function renderShelfIndex(snapshot, label, width, scale_pct, days, show_sc
     group[#group + 1] = textWidget(_("MEASURE  ·  OBSERVED"), width, scale_pct, "label")
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(5) }
     local ledger = {
-        { metricByKey(snapshot, "depth"), _("SESSION DEPTH") },
-        { metricByKey(snapshot, "loyalty"), _("BOOK LOYALTY") },
-        { metricByKey(snapshot, "exploration"), _("EXPLORATION") },
-        { metricByKey(snapshot, "night"), _("NIGHT READING") },
-        { metricByKey(snapshot, "switching"), _("BOOK SWITCHES") },
+        { metricByKey(snapshot, "consistency"), _("READING REGULARITY") },
+        { metricByKey(snapshot, "depth"), _("SESSION LENGTH") },
+        { metricByKey(snapshot, "loyalty"), _("FOCUSED DAYS") },
+        { metricByKey(snapshot, "exploration"), _("READING BREADTH") },
+        { metricByKey(snapshot, "night"), _("NIGHT-TIME SHARE") },
+        { metricByKey(snapshot, "switching"), _("BOOK CHANGES") },
+        { metricByKey(snapshot, "streak"), _("LONGEST STREAK") },
+        { metricByKey(snapshot, "weekend"), _("WEEKEND READING") },
     }
     for index = 1, #ledger do
         local metric = ledger[index][1]
         local raw = metric and metric.raw or _("Not available")
+        local value = VerticalGroup:new{ align = "left",
+            textWidget(raw, width * 0.52, scale_pct, "metric_value"),
+            metric and textWidget(metric.detail, width * 0.52, scale_pct, "muted")
+                or textWidget(_("No metric data"), width * 0.52, scale_pct, "muted"),
+        }
+        if metric and not metric.available and metric.confidence_hint then
+            value[#value + 1] = textWidget(T(_("Provisional · %1"), metric.confidence_hint),
+                width * 0.52, scale_pct, "muted")
+        end
         local row = HorizontalGroup:new{ align = "center",
             textWidget(ledger[index][2], width * 0.42, scale_pct, "label"),
             HorizontalSpan:new{ width = Kit.sc(scale_pct)(8) },
-            textWidget(raw, width * 0.52, scale_pct, "metric_value"),
+            value,
         }
         group[#group + 1] = row
         addDivider(group, width)
     end
+    addTrend(group, snapshot, width, scale_pct, days)
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) }
     local foot_width = math.max(1, width - Kit.sc(scale_pct)(120))
     local foot = VerticalGroup:new{ align = "left",
@@ -879,7 +919,7 @@ local function renderBookSpines(book_count, width, scale_pct)
     return WidgetClass:new{}
 end
 
-local function renderFingerprint(snapshot, label, width, scale_pct, days, show_scores)
+local function renderFingerprint(snapshot, label, width, scale_pct, days, show_traits)
     local VerticalGroup = require("ui/widget/verticalgroup")
     local VerticalSpan = require("ui/widget/verticalspan")
     local HorizontalGroup = require("ui/widget/horizontalgroup")
@@ -893,8 +933,10 @@ local function renderFingerprint(snapshot, label, width, scale_pct, days, show_s
     }
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(4) }
     group[#group + 1] = textWidget(label, width, scale_pct, "display")
+    local trait_summary = show_traits and getTraitSummary(snapshot) or nil
+    if trait_summary then group[#group + 1] = textWidget(trait_summary, width, scale_pct, "muted") end
     group[#group + 1] = textWidget(
-        T(_("%1 reading days · stats %2"), snapshot.active_days, getCoverageText(snapshot)),
+        T(_("%1 reading days · history %2"), snapshot.active_days, getCoverageText(snapshot)),
         width, scale_pct, "normal")
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(8) }
     group[#group + 1] = renderBookSpines(snapshot.book_count, width, scale_pct)
@@ -907,30 +949,27 @@ local function renderFingerprint(snapshot, label, width, scale_pct, days, show_s
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(9) }
     addDivider(group, width)
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) }
-    local score_gap = Kit.sc(scale_pct)(10)
-    local tile_width = math.max(1, math.floor((width - score_gap) / 2))
+    local tile_gap = Kit.sc(scale_pct)(10)
+    local tile_width = math.max(1, math.floor((width - tile_gap) / 2))
     local tile_inner = math.max(1, tile_width - Kit.sc(scale_pct)(12))
-    local tile_notes = {
-        _("active days"), _("median · recorded sessions"), _("focused days"),
-        _("books + author credits"), _("of recorded time"), _("switches / sessions"),
-    }
     local tile_titles = {
-        _("Consistency"), _("Session depth"), _("Book loyalty"),
-        _("Exploration"), _("Night reading"), _("Book changes"),
+        _("Reading regularity"), _("Session length"), _("Focused days"),
+        _("Reading breadth"), _("Night-time share"), _("Book changes"),
+        _("Longest reading streak"), _("Weekend reading"),
     }
     for index = 1, #snapshot.metrics, 2 do
-        local left = renderScoreTile(snapshot.metrics[index], tile_titles[index], tile_notes[index], tile_inner, scale_pct)
+        local left = renderMeasureTile(snapshot.metrics[index], tile_titles[index], tile_inner, scale_pct, tile_width)
         local right = snapshot.metrics[index + 1]
-            and renderScoreTile(snapshot.metrics[index + 1], tile_titles[index + 1],
-                tile_notes[index + 1], tile_inner, scale_pct)
+            and renderMeasureTile(snapshot.metrics[index + 1], tile_titles[index + 1], tile_inner, scale_pct, tile_width)
             or HorizontalSpan:new{ width = tile_width }
         group[#group + 1] = HorizontalGroup:new{ align = "top",
             left,
-            HorizontalSpan:new{ width = score_gap },
+            HorizontalSpan:new{ width = tile_gap },
             right,
         }
         if index + 1 < #snapshot.metrics then group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) } end
     end
+    addTrend(group, snapshot, width, scale_pct, days)
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(7) }
     group[#group + 1] = HorizontalGroup:new{ align = "top",
         textWidget(T(_("Coverage: %1 of %2 days"), getObservedDays(snapshot), days), width * 0.56, scale_pct, "muted"),
@@ -940,14 +979,14 @@ local function renderFingerprint(snapshot, label, width, scale_pct, days, show_s
     return group
 end
 
-local function renderFullScreenLayout(layout, snapshot, label, width, scale_pct, days, show_scores)
+local function renderFullScreenLayout(layout, snapshot, label, width, scale_pct, days, show_traits)
     local renderers = {
         field_notes = renderFieldNotes,
         shelf_index = renderShelfIndex,
         fingerprint = renderFingerprint,
     }
     local ok, widget = pcall(renderers[layout] or renderFieldNotes,
-        snapshot, label, width, scale_pct, days, show_scores)
+        snapshot, label, width, scale_pct, days, show_traits)
     if ok and widget then return widget end
     require("logger").warn("[reading_dna] full-screen layout failed:", layout, widget)
     return Kit.valueCard{
@@ -961,14 +1000,14 @@ end
 local function render(ctx)
     local width, scale_pct = math.max(50, ctx.width or 200), ctx.scale or 100
     local days = getWindow(ctx)
-    local show_scores = ctx.config:get("show_scores", true) ~= false
+    local show_traits = ctx.config:get("show_archetype", true) ~= false
     local layout = getLayout(ctx)
     _refresh = ctx.refresh
 
     if ctx.preview then
         return Kit.valueCard{
             width = width, scale_pct = scale_pct,
-            heading = _("Reading DNA"), value = _("Mixed Reader"),
+            heading = _("Reading DNA"), value = _("Reading profile"),
             sub = _("Tap to analyze your reading patterns"),
             context = T(_("Last %1 days · Works offline"), days),
         }
@@ -1009,25 +1048,30 @@ local function render(ctx)
         }
     end
 
-    local label = ctx.config:get("show_archetype", true) and snapshot.archetype or _("Profile")
+    local label = _("Reading profile")
     local full = ctx.surface == "fullscreen"
     if full then
-        return renderFullScreenLayout(layout, snapshot, label, width, scale_pct, days, show_scores)
+        return renderFullScreenLayout(layout, snapshot, label, width, scale_pct, days, show_traits)
     end
     local group = require("ui/widget/verticalgroup"):new{ align = "left" }
     local VerticalSpan = require("ui/widget/verticalspan")
     group[#group + 1] = renderProfileHeader(snapshot, label, width, scale_pct, days)
+    local trait_summary = show_traits and getTraitSummary(snapshot) or nil
+    if trait_summary then group[#group + 1] = textWidget(trait_summary, width, scale_pct, "muted") end
     group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(16) }
     local visible_metrics = {}
-    for _, metric in ipairs(snapshot.metrics) do visible_metrics[#visible_metrics + 1] = metric end
+    local metric_order = {}
+    for index, metric in ipairs(snapshot.metrics) do
+        metric_order[metric.key] = index
+        visible_metrics[#visible_metrics + 1] = metric
+    end
     table.sort(visible_metrics, function(a, b)
-        if a.score == nil then return false end
-        if b.score == nil then return true end
-        return a.score > b.score
+        if a.available ~= b.available then return a.available end
+        return metric_order[a.key] < metric_order[b.key]
     end)
     local count = math.min(2, #visible_metrics)
     for i = 1, count do
-        group[#group + 1] = renderMetric(visible_metrics[i], width, scale_pct, show_scores)
+        group[#group + 1] = renderMetric(visible_metrics[i], width, scale_pct)
         if i < count then group[#group + 1] = VerticalSpan:new{ width = Kit.sc(scale_pct)(12) } end
     end
     return group
@@ -1039,7 +1083,6 @@ showSettings = function(ctx)
     local ButtonDialog = require("ui/widget/buttondialog")
     local current = getWindow(ctx)
     local night_window = ctx.config:get("night_window", "21-04")
-    local show_scores = ctx.config:get("show_scores", true) ~= false
     local show_archetype = ctx.config:get("show_archetype", true) ~= false
     -- Older builds wrote their choice to Bookshelf's own `layout` entry field.
     -- Move only our known values to a namespaced key, then release the host key.
@@ -1101,8 +1144,7 @@ showSettings = function(ctx)
             { { text = (night_window == "20-06" and "✓ " or "  ") .. "20:00–06:00", callback = chooseNight("20-06") } },
             { { text = (night_window == "21-04" and "✓ " or "  ") .. "21:00–04:00", callback = chooseNight("21-04") } },
             { { text = (night_window == "22-05" and "✓ " or "  ") .. "22:00–05:00", callback = chooseNight("22-05") } },
-            { { text = (show_scores and "✓ " or "  ") .. _("Show scores"), callback = updateSetting("show_scores", not show_scores) } },
-            { { text = (show_archetype and "✓ " or "  ") .. _("Show archetype"), callback = updateSetting("show_archetype", not show_archetype) } },
+            { { text = (show_archetype and "✓ " or "  ") .. _("Show reader traits"), callback = updateSetting("show_archetype", not show_archetype) } },
             { { text = _("Done"), callback = function() UIManager:close(dialog) end } },
         },
     }

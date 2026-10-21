@@ -19,8 +19,10 @@ The tap reads twice the selected period once. The calculation splits those rows 
 - A “session” is inferred from event timestamps and a 20-minute gap; KOReader does not store a session ID in this table.
 - Event durations approximate reading time. Night allocation splits each event duration across device-local hours.
 - Book authors are metadata strings; incomplete or inconsistent metadata weakens exploration counts.
-- Completion and genre scores are intentionally omitted.
-- Archetype labels are descriptive and provisional below the evidence gate.
+- The regularity denominator is the local calendar span from the earliest positive-duration event to the end of the selected window. It is not evidence that statistics were available on every day.
+- Completion and genre measures are omitted because this event source does not reliably support them.
+- No composite 0–100 score is used. Measures remain in their native units and reader traits may overlap.
+- Reader traits use a 14-active-day / 5-hour overall evidence gate, with additional per-trait sample thresholds documented in the README.
 
 ## Device review checklist
 

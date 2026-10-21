@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 — Evidence-based reading profiles
+
+- Remove arbitrary 0–100 scores; show observed values, definitions, and sample thresholds.
+- Correct book-change denominator to valid session transitions.
+- Add longest reading streak and weekend reading share.
+- Replace exclusive archetype priority with overlapping, evidence-gated reader traits.
+- Invalidate cached snapshots when the profile schema changes.
+
 ## 0.3.2 — Layout setting isolation
 
 - Store visual choice under a Reading DNA-specific key, avoiding Bookshelf's reserved `layout` field.
