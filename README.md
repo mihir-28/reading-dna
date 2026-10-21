@@ -2,7 +2,7 @@
 
 Offline reading profile for KOReader's Bookshelf micro-modules. It summarizes recent reading patterns as consistency, inferred session depth, book loyalty, exploration, night reading, and book switching.
 
-Current development version: `0.3.0`.
+Current development version: `0.3.1`.
 
 Reading DNA is a descriptive, playful summary, not a psychological assessment. Scores are hidden when evidence is too limited. Archetypes stay provisional until the selected window contains at least 14 active days and 5 hours of recorded reading.
 
@@ -38,7 +38,7 @@ Long-press the card, then choose **Module settings**:
 - Show or hide scores.
 - Show or hide archetype.
 
-Changing the analysis window or night interval clears the cached summary; tap the card to recalculate. Layout changes apply to the next full-screen render without rerunning analysis.
+Changing the analysis window or night interval starts analysis automatically. Layout, score, and archetype choices apply without rerunning analysis. Tap the card any time to refresh statistics.
 
 ## Metrics
 
@@ -60,7 +60,7 @@ Completion is not scored: the statistics database does not provide reliable fini
 - Reads `statistics.sqlite3` in SQLite read-only mode.
 - Uses `page_stat_data` events and `book` author metadata.
 - Does not access the network, write to the statistics database, change book progress, or read book contents.
-- Queries run only after a tap, in batches of up to 100 rows per UI tick. Card rendering uses cached aggregates and does not query SQLite.
+- Queries run after a tap or an analysis-setting change, in batches of up to 100 rows per UI tick. Card rendering uses cached aggregates and does not query SQLite.
 - Saves only the aggregate profile through Bookshelf's `Kit.moduleStore("reading_dna")`.
 
 ## Repository layout

@@ -7,7 +7,7 @@ local T = require("ffi/util").template
 local Kit = require("lib/bookshelf_module_kit")
 
 local MODULE_KEY = "reading_dna"
-local MODULE_VERSION = "0.3.0"
+local MODULE_VERSION = "0.3.1"
 local DEFAULT_WINDOW = 30
 local SESSION_GAP = 20 * 60
 local MIN_SESSION = 60
@@ -18,6 +18,7 @@ local MIN_TOTAL_SECONDS = 5 * 60 * 60
 local store = Kit.moduleStore(MODULE_KEY)
 local _refresh
 local analysis_pending = false
+local analysis_generation = 0
 
 local function clamp(value, low, high)
     return math.max(low, math.min(high, value))
@@ -415,6 +416,34 @@ local function getWindow(ctx)
     return value
 end
 
+local function startAnalysis(ctx, replace_pending)
+    if analysis_pending and not replace_pending then return end
+    analysis_generation = analysis_generation + 1
+    local generation = analysis_generation
+    analysis_pending = true
+    local days = getWindow(ctx)
+    local night_window = ctx.config:get("night_window", "21-04")
+    local night_hours = {
+        ["20-06"] = { 20, 6 }, ["21-04"] = { 21, 4 }, ["22-05"] = { 22, 5 },
+    }
+    local selected_night = night_hours[night_window] or night_hours["21-04"]
+    local night_start, night_end = selected_night[1], selected_night[2]
+    store:set("snapshot", { pending = true, days = days })
+    if _refresh then _refresh() end
+    readEventsAsync(days * 2, function(result, err)
+        -- A newer settings choice supersedes this result; never display a stale window.
+        if generation ~= analysis_generation then return end
+        analysis_pending = false
+        local snapshot
+        if result then
+            snapshot, err = calculate(days, night_start, night_end, result)
+        end
+        if snapshot then store:set("snapshot", snapshot)
+        else store:set("snapshot", { error = err, days = days, analyzed_at = os.time() }) end
+        if _refresh then _refresh() end
+    end)
+end
+
 local function getSnapshot(days)
     local snapshot = store:get("snapshot")
     if type(snapshot) == "table" and snapshot.days == days then return snapshot end
@@ -789,7 +818,6 @@ showSettings = function(ctx)
         return function()
             UIManager:close(dialog)
             ctx.config:set(name, value)
-            store:delete("snapshot")
             if ctx.menu and ctx.menu._reload then ctx.menu:_reload() end
             showSettings(ctx)
         end
@@ -798,8 +826,8 @@ showSettings = function(ctx)
         return function()
             UIManager:close(dialog)
             ctx.config:set("window_days", days)
-            store:delete("snapshot")
             if ctx.menu and ctx.menu._reload then ctx.menu:_reload() end
+            startAnalysis(ctx, true)
             showSettings(ctx)
         end
     end
@@ -807,8 +835,8 @@ showSettings = function(ctx)
         return function()
             UIManager:close(dialog)
             ctx.config:set("night_window", window)
-            store:delete("snapshot")
             if ctx.menu and ctx.menu._reload then ctx.menu:_reload() end
+            startAnalysis(ctx, true)
             showSettings(ctx)
         end
     end
@@ -851,27 +879,7 @@ local module = {
     keep_open = true,
     render = render,
     on_tap = function(ctx)
-        if analysis_pending then return end
-        analysis_pending = true
-        local days = getWindow(ctx)
-        local night_window = ctx.config:get("night_window", "21-04")
-        local night_hours = {
-            ["20-06"] = { 20, 6 }, ["21-04"] = { 21, 4 }, ["22-05"] = { 22, 5 },
-        }
-        local selected_night = night_hours[night_window] or night_hours["21-04"]
-        local night_start, night_end = selected_night[1], selected_night[2]
-        store:set("snapshot", { pending = true, days = days })
-        if _refresh then _refresh() end
-        readEventsAsync(days * 2, function(result, err)
-            analysis_pending = false
-            local snapshot
-            if result then
-                snapshot, err = calculate(days, night_start, night_end, result)
-            end
-            if snapshot then store:set("snapshot", snapshot)
-            else store:set("snapshot", { error = err, days = days, analyzed_at = os.time() }) end
-            if _refresh then _refresh() end
-        end)
+        startAnalysis(ctx, false)
     end,
     show_settings = showSettings,
 }

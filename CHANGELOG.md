@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 — Automatic analysis refresh
+
+- Start analysis when the selected window or night interval changes.
+- Preserve cached analysis when changing presentation-only settings.
+- Ignore stale asynchronous results when a newer analysis request supersedes them.
+
 ## 0.3.0 — Selectable reading layouts
 
 - Add Field Notes, Shelf Index, and Fingerprint full-screen layouts, selected in module settings.
