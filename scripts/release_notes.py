@@ -27,23 +27,18 @@ def sections(text: str) -> list[tuple[str, str]]:
 
 def extract(text: str, version: str, since: str | None = None) -> str:
     parsed = sections(text)
-    selected = []
-    found_version = False
-    for section_version, section in parsed:
-        if not found_version:
-            if section_version == version:
-                found_version = True
-            else:
-                continue
-        if since and section_version == since:
-            break
-        selected.append(section)
-    if not found_version:
+    versions = [section_version for section_version, _ in parsed]
+    if version not in versions:
         raise ValueError(f"CHANGELOG.md missing entry for {version}")
-    if since and not any(section_version == since for section_version, _ in parsed):
-        raise ValueError(f"CHANGELOG.md missing lower bound {since}")
-    if since and (not selected or selected[-1].startswith(f"## {since}")):
-        raise ValueError(f"No changelog sections found after {since}")
+    start = versions.index(version)
+    end = start + 1
+    if since:
+        if since not in versions:
+            raise ValueError(f"CHANGELOG.md missing lower bound {since}")
+        end = versions.index(since)
+        if end <= start:
+            raise ValueError(f"Lower bound {since} must follow {version}")
+    selected = [section for _, section in parsed[start:end]]
     return "\n\n".join(selected)
 
 
