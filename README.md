@@ -68,9 +68,15 @@ README.md                       User and installation guide
 
 ## Credits
 
-Built for [Bookshelf](https://github.com/AndyHazz/bookshelf.koplugin) and KOReader's Reading statistics plugin.
+Built for [Bookshelf](https://github.com/AndyHazz/bookshelf.koplugin) and [KOReader](https://github.com/koreader/koreader). Reading data comes from KOReader's [Statistics plugin](https://github.com/koreader/koreader/tree/master/plugins/statistics.koplugin).
 
 ## License
 
 GNU Affero General Public License v3.0 only. See [LICENSE](LICENSE).
+
+## Upstream projects
+
+- [KOReader](https://github.com/koreader/koreader)
+- [Bookshelf plugin](https://github.com/AndyHazz/bookshelf.koplugin)
+- [KOReader Statistics plugin source](https://github.com/koreader/koreader/tree/master/plugins/statistics.koplugin)
 
